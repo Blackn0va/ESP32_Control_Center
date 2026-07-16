@@ -1,0 +1,31 @@
+{
+  "name": "marauder-control-center",
+  "version": "1.0.0",
+  "description": "Browser-based control panel and flasher for the ESP32 Marauder. For authorized security testing and education only.",
+  "type": "module",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "serve": "npx --yes serve .",
+    "check": "node scripts/check-syntax.mjs"
+  },
+  "keywords": [
+    "esp32",
+    "marauder",
+    "web-serial",
+    "esptool",
+    "flasher",
+    "security-testing",
+    "wifi",
+    "ble"
+  ],
+  "author": "Blackn0va",
+  "license": "MIT",
+  "homepage": "https://github.com/Blackn0va/marauder-control-center#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Blackn0va/marauder-control-center.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Blackn0va/marauder-control-center/issues"
+  }
+}

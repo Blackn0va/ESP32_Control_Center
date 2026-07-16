@@ -1,0 +1,23 @@
+# Third-party firmware (GPL) — never commit, generated/downloaded locally
+firmware-embed.js
+parts-embed.js
+fwparts/
+*.bin
+*.elf
+
+# Node / tooling
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Logs / scratch
+*.log
+scratch/
+tmp/

