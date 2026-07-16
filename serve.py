@@ -341,7 +341,7 @@ def job_hashcat(jid, info, body, cap):
         f.write(hashline + "\n")
     mode = body.get("mode") or ("path" if body.get("wordlist_path") else "common")
     cmd = [hashcat_bin(), "-m", "22000", "-o", outf, "--potfile-disable",
-           "--status", "--status-timer", "1", "--machine-readable", "--quiet"]
+           "--status", "--status-timer", "1", "--machine-readable"]
     if mode == "mask":
         cmd += ["-a", "3", hf, body.get("mask") or "?d?d?d?d?d?d?d?d"]
     elif mode == "digits":
@@ -355,7 +355,10 @@ def job_hashcat(jid, info, body, cap):
             f.write("\n".join(BUILTIN_COMMON))
         cmd += ["-a", "0", hf, wl]
     try:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # WICHTIG: hashcat aus SEINEM Ordner starten, sonst findet es OpenCL/kernels nicht (0 Hashes).
+        hcdir = os.path.dirname(hashcat_bin() or "")
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             cwd=hcdir or None)
         for line in p.stdout:
             parts = line.strip().split("\t")
             # machine-readable: STATUS <n> ... PROGRESS <done> <total> ...
@@ -382,10 +385,20 @@ HASHCAT_BIN = None
 
 
 def hashcat_bin():
-    """Pfad zum hashcat-Binary: nachinstalliertes bevorzugt, sonst PATH."""
-    if HASHCAT_BIN and os.path.isfile(HASHCAT_BIN):
+    """Pfad zum hashcat-Binary: gesetzt > PATH > bereits entpacktes ./tools."""
+    if HASHCAT_BIN and os.path.isfile(HASHCAT_BIN) and (os.name != "nt" or HASHCAT_BIN.lower().endswith(".exe")):
         return HASHCAT_BIN
-    return shutil.which("hashcat")
+    w = shutil.which("hashcat")
+    if w:
+        return w
+    want = "hashcat.exe" if os.name == "nt" else "hashcat.bin"   # plattformrichtige Binary!
+    tools = os.path.join(os.getcwd(), "tools")
+    if os.path.isdir(tools):
+        for root, _, files in os.walk(tools):
+            for fn in files:
+                if fn.lower() == want:
+                    return os.path.join(root, fn)
+    return None
 
 
 def install_hashcat():
@@ -415,10 +428,17 @@ def install_hashcat():
             continue
     if not ok:
         raise RuntimeError("Entpacken fehlgeschlagen (7z/tar fehlt). Archiv liegt unter: " + arc)
+    want = "hashcat.exe" if os.name == "nt" else "hashcat.bin"   # plattformrichtig, sonst WinError 193
+    fallback = None
     for root, _, files in os.walk(tools):
         for fn in files:
-            if fn.lower() in ("hashcat.exe", "hashcat.bin", "hashcat"):
+            low = fn.lower()
+            if low == want:
                 return os.path.join(root, fn)
+            if low in ("hashcat.exe", "hashcat.bin"):
+                fallback = fallback or os.path.join(root, fn)
+    if fallback:
+        return fallback
     raise RuntimeError("hashcat-Binary nach Entpacken nicht gefunden")
 
 
@@ -429,6 +449,31 @@ def job_install(jid):
         binp = install_hashcat()
         HASHCAT_BIN = binp
         _jset(jid, done=True, found=True, password=binp, method="installiert")
+    except Exception as e:
+        _jset(jid, done=True, error=str(e))
+
+
+def job_rockyou(jid):
+    """Laedt rockyou.txt (~134 MB, 14 Mio Passwoerter) von GitHub nach ./tools."""
+    try:
+        url = "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt"
+        tools = os.path.join(os.getcwd(), "tools")
+        os.makedirs(tools, exist_ok=True)
+        dst = os.path.join(tools, "rockyou.txt")
+        _jset(jid, method="download rockyou.txt (~134 MB)...")
+        req = urllib.request.Request(url, headers={"User-Agent": "MCC"})
+        with urllib.request.urlopen(req, timeout=900) as r:
+            _jset(jid, total=int(r.headers.get("Content-Length", "0")))
+            got = 0
+            with open(dst, "wb") as f:
+                while True:
+                    chunk = r.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    got += len(chunk)
+                    _jset(jid, tested=got)
+        _jset(jid, done=True, found=True, password=dst, method="rockyou")
     except Exception as e:
         _jset(jid, done=True, error=str(e))
 
@@ -463,6 +508,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             jid = _new_job()
             _jset(jid, engine="hashcat-Installer", method="starte...")
             threading.Thread(target=job_install, args=(jid,), daemon=True).start()
+            self._send_json({"ok": True, "job_id": jid})
+            return
+        if path == "/get_rockyou":
+            jid = _new_job()
+            _jset(jid, engine="rockyou-Download", method="starte...")
+            threading.Thread(target=job_rockyou, args=(jid,), daemon=True).start()
             self._send_json({"ok": True, "job_id": jid})
             return
         if path != "/crack":

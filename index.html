@@ -397,7 +397,9 @@
       </div>
       <div class="row">
         <button class="btn atk" id="crackRun">🔓 Lokal cracken</button>
-        <button class="btn" id="hcInstall" title="Lädt das neueste hashcat von GitHub (~50 MB) nach ./tools und nutzt danach die GPU.">⬇ hashcat holen (GPU)</button>
+        <button class="btn primary" id="setupAll" title="Lädt hashcat (~50 MB) + rockyou (~134 MB) und richtet GPU-Cracking komplett ein.">⚙ Alles einrichten (GPU)</button>
+        <button class="btn" id="hcInstall" title="Nur hashcat (~50 MB) nach ./tools.">⬇ hashcat</button>
+        <button class="btn" id="rockyouGet" title="Nur rockyou.txt (~134 MB) nach ./tools.">⬇ rockyou</button>
         <span class="hint" id="crackStatus">bereit</span>
       </div>
 
@@ -1770,6 +1772,42 @@ $("hcInstall").onclick=async()=>{
     if(s.error)$("crackStatus").textContent="hashcat-Install-Fehler: "+s.error;
     else{$("crackStatus").innerHTML="✅ hashcat installiert — GPU aktiv. Jetzt Lokal cracken drücken.";append("hashcat installiert: "+s.password,"line-sys");}
   },1000);};
+$("rockyouGet").onclick=async()=>{
+  if(!confirm("rockyou.txt (~134 MB, 14 Mio Passwörter) von GitHub laden nach ./tools?"))return;
+  $("rockyouGet").disabled=true;$("crackStatus").textContent="rockyou wird geladen…";
+  let j;try{j=await(await fetch(location.origin+"/get_rockyou",{method:"POST"})).json();}
+  catch(e){$("crackStatus").textContent="Fehler: "+e.message+" — läuft serve.py?";$("rockyouGet").disabled=false;return;}
+  if(!j.ok){$("crackStatus").textContent="Fehler: "+(j.error||"?");$("rockyouGet").disabled=false;return;}
+  const jid=j.job_id,poll=setInterval(async()=>{
+    let s;try{s=await(await fetch(location.origin+"/crack_status?id="+jid)).json();}catch(e){return;}
+    if(!s.done){const mb=(x)=>(x/1048576).toFixed(0);$("crackStatus").textContent="rockyou lädt… "+mb(s.tested||0)+(s.total?"/"+mb(s.total):"")+" MB";return;}
+    clearInterval(poll);$("rockyouGet").disabled=false;
+    if(s.error)$("crackStatus").textContent="rockyou-Fehler: "+s.error;
+    else{$("crackWl").value=s.password;$("crackMode").value="path";
+      $("crackStatus").innerHTML="✅ rockyou geladen + als Wortliste gesetzt (Modus: Datei). Jetzt Lokal cracken.";append("rockyou: "+s.password,"line-sys");}
+  },1000);};
+// gemeinsame Helfer + "Alles einrichten"
+function pollJob(jid,onprog){return new Promise(res=>{const p=setInterval(async()=>{
+  let s;try{s=await(await fetch(location.origin+"/crack_status?id="+jid)).json();}catch(e){return;}
+  if(onprog)onprog(s);if(s.done){clearInterval(p);res(s);}},1000);});}
+async function postJob(path){const j=await(await fetch(location.origin+path,{method:"POST"})).json();if(!j.ok)throw new Error(j.error||"Fehler");return j.job_id;}
+$("setupAll").onclick=async()=>{
+  if(!confirm("hashcat (~50 MB) + rockyou (~134 MB) laden und GPU-Cracking komplett einrichten?"))return;
+  $("setupAll").disabled=true;
+  const mb=x=>((x||0)/1048576|0);
+  try{
+    $("crackStatus").textContent="1/2 hashcat wird geladen…";
+    let s=await pollJob(await postJob("/install_hashcat"),x=>{if(!x.done)$("crackStatus").textContent="1/2 hashcat: "+(x.method||"…");});
+    if(s.error)throw new Error("hashcat: "+s.error);
+    append("hashcat installiert: "+s.password,"line-sys");
+    $("crackStatus").textContent="2/2 rockyou wird geladen…";
+    s=await pollJob(await postJob("/get_rockyou"),x=>{if(!x.done)$("crackStatus").textContent="2/2 rockyou "+mb(x.tested)+(x.total?"/"+mb(x.total):"")+" MB";});
+    if(s.error)throw new Error("rockyou: "+s.error);
+    $("crackWl").value=s.password;$("crackMode").value="path";
+    $("crackStatus").innerHTML="✅ Fertig eingerichtet: hashcat/GPU + rockyou gesetzt. Jetzt Lokal cracken.";
+    append("Setup fertig: GPU + rockyou","line-sys");
+  }catch(e){$("crackStatus").textContent="Setup-Fehler: "+e.message+" — läuft serve.py?";}
+  finally{$("setupAll").disabled=false;}};
 
 // portal
 $("epStartFile").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c start -w "+f);};

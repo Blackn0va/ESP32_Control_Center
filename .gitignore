@@ -21,3 +21,12 @@ Thumbs.db
 *.log
 scratch/
 tmp/
+
+# Heruntergeladene Abhaengigkeiten / Artefakte (nie committen)
+tools/
+*.7z
+*.pcap
+*.pcapng
+*.hc22000
+rockyou.txt
+.env
