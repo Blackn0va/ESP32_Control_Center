@@ -43,13 +43,19 @@ Web Serial requires **Chrome or Edge (desktop)** and a **secure context**
 GitHub firmware download (CORS) — serve it locally instead:
 
 ```bash
-# Python (any OS)
-python -m http.server 8000
+# Recommended (any OS): serves the app AND proxies GitHub firmware
+# downloads server-side, so flashing works without CORS/403 issues.
+python serve.py
 # then open http://localhost:8000
 
-# or Node
-npx serve .
+# Static only (firmware download relies on public CORS proxies, may 403):
+python -m http.server 8000
+# or: npx serve .
 ```
+
+> **Für den Flash-Tab `python serve.py` nutzen** — nur damit geht der Firmware-Download
+> zuverlässig (lokaler `/proxy`-Endpunkt umgeht GitHubs fehlende CORS-Header). Der reine
+> `http.server` kann das nicht und ist auf öffentliche Proxies angewiesen, die 403 liefern können.
 
 Then:
 

