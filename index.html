@@ -350,9 +350,55 @@
         <button class="btn" id="fList" disabled>PCAPs auflisten</button>
         <span class="hint" id="fState">getrennt</span>
       </div>
+      <div class="hint" id="fFilesHint" style="display:none">Gefundene PCAPs — anklicken zum Herunterladen:</div>
+      <div id="fFiles" class="row" style="flex-wrap:wrap;gap:6px"></div>
       <div class="row">
-        <input type="text" id="fPath" placeholder="/ext/apps_data/marauder/xxx.pcap" style="flex:1">
-        <button class="btn primary" id="fPull" disabled>⬇ diese PCAP holen</button>
+        <input type="text" id="fPath" placeholder="oder Pfad manuell: /ext/apps_data/marauder/pcaps/xxx.pcap" style="flex:1">
+        <button class="btn primary" id="fPull" disabled>⬇ holen</button>
+      </div>
+
+      <h3>🐍 PCAP lokal cracken (Python — kein hashcat nötig)</h3>
+      <div class="hint">Läuft im <code>serve.py</code>-Backend (reines Python: PMKID + 4-Way-Handshake). Große Wortliste als <b>Pfad</b> angeben (wird serverseitig gelesen). <b>Nur eigene / autorisierte Netze.</b></div>
+      <div class="row">
+        <input type="file" id="crackPcap" accept=".pcap,.pcapng">
+        <span class="hint">leer = zuletzt per Kanal 0 geholte PCAP</span>
+      </div>
+      <div class="row">
+        <input type="text" id="crackSsid" placeholder="SSID (leer = automatisch aus PCAP)" style="flex:1">
+      </div>
+      <div class="row">
+        <label>Modus</label>
+        <select id="crackMode">
+          <option value="common">Eingebaute Liste (häufige PWs — schnell, ohne Datei)</option>
+          <option value="path">Wortliste-Datei (Pfad unten)</option>
+          <option value="digits">Ziffern-Brute (nur Zahlen — langsam!)</option>
+          <option value="mask">Maske / Muster (hashcat/GPU; CPU nur ?d)</option>
+        </select>
+        <label title="Nur für Ziffern-Brute">Länge</label>
+        <input type="number" id="crackDmin" value="8" min="8" max="12" style="width:55px" title="min">
+        <input type="number" id="crackDmax" value="8" min="8" max="12" style="width:55px" title="max">
+      </div>
+      <div class="row">
+        <label>Maske</label>
+        <select id="crackMaskPreset" title="Füllt das Maskenfeld. ?d=Ziffer ?l=klein ?u=groß ?s=Sonderzeichen ?a=alles">
+          <option value="">— Preset —</option>
+          <option value="?d?d?d?d?d?d?d?d">8 Ziffern</option>
+          <option value="?d?d?d?d?d?d?d?d?d?d">10 Ziffern</option>
+          <option value="?d?d?d?d?d?d?d?d?d?d?d?d">12 Ziffern (Router-Key)</option>
+          <option value="?u?l?l?l?l?l?l?l">Groß + 7 klein</option>
+          <option value="?l?l?l?l?l?l?l?l">8 Kleinbuchstaben</option>
+          <option value="?l?l?l?l?l?l?d?d">6 klein + 2 Ziffern</option>
+          <option value="?u?l?l?l?l?l?d?d?d?d">Wort + 4 Ziffern (Groß)</option>
+        </select>
+        <input type="text" id="crackMask" placeholder="?d?d?d?d?d?d?d?d" style="flex:1">
+      </div>
+      <div class="row">
+        <input type="text" id="crackWl" placeholder="Wortlisten-Pfad (nur bei Modus 'Datei'), z.B. C:\wordlists\rockyou.txt" style="flex:1">
+      </div>
+      <div class="row">
+        <button class="btn atk" id="crackRun">🔓 Lokal cracken</button>
+        <button class="btn" id="hcInstall" title="Lädt das neueste hashcat von GitHub (~50 MB) nach ./tools und nutzt danach die GPU.">⬇ hashcat holen (GPU)</button>
+        <span class="hint" id="crackStatus">bereit</span>
       </div>
 
       <div style="margin-top:20px">
@@ -1190,7 +1236,7 @@ function setOpMode(m){opMode=m;try{localStorage.setItem("mccOpMode",m);}catch(_)
 function updModeUI(){const flip=opMode==="flipper";
   const cw=$("capSdNote");if(cw){cw.style.borderColor="var(--red)";
     cw.innerHTML=flip
-      ?"<b>Dein Setup (nur TX/RX/3V/GND):</b> der ESP32 hat KEINE SD → <code>SD not found</code> ist normal. PCAP speichert nur der Flipper selbst.<br><b>So gehts:</b> 1) Am <b>Flipper</b>: Apps → GPIO → <b>[ESP32] WiFi Marauder</b> öffnen. 2) Dort den Sniff starten (nicht hier) → Flipper schreibt die <code>.pcap</code> auf seine SD. 3) <b>qFlipper</b> → Ordner <code>apps_data/marauder/</code> → Datei auf den PC → cracken (unten)."
+      ?"<b>Dein Setup (nur TX/RX/3V/GND):</b> der ESP32 hat KEINE SD → <code>SD not found</code> ist normal. PCAP speichert nur der Flipper selbst.<br><b>So gehts:</b> 1) Am <b>Flipper</b>: Apps → GPIO → <b>[ESP32] WiFi Marauder</b> öffnen. 2) Dort den Sniff starten (nicht hier) → Flipper schreibt die <code>.pcap</code> auf seine SD. 3) <b>qFlipper</b> → Ordner <code>apps_data/marauder/pcaps/</code> → Datei auf den PC → cracken (unten)."
       :"<b>Standalone:</b> braucht eine microSD am ESP32-Board. Ohne SD kein Handshake-Export — nur Zähler über USB. Alternativ über Flipper betreiben (Modus oben).";}
   const fh=$("fwHint");if(fh)fh.innerHTML=flip
     ?"<b>Flipper-Modus:</b> nimm den <b>_flipper</b>-Build (ESP32 am Flipper). Auto-Flash bevorzugt ihn. Flashen aber am besten direkt am Board (UART/CH343), nicht durch den Flipper."
@@ -1629,21 +1675,101 @@ function fProcess(){
       fRaw=fRaw.subarray(end);fProcess();return;}
     if(fRaw.length>4096)fRaw=fRaw.subarray(fRaw.length-2048);   // Puffer begrenzen bis Marker kommt
     return;}
-  // normaler CLI-Text -> loggen, Puffer leeren
-  const t=bytesToLatin1(fRaw).replace(/[^\x09\x0a\x0d\x20-\x7e]/g,"");
-  t.split(/\r?\n/).forEach(l=>{if(l.trim())append("[flipper] "+l,"line-sys");});
-  fRaw=new Uint8Array(0);}
-function fFinishCap(){const c=fCap;fCap=null;
+  // normaler CLI-Text -> loggen + PCAP-Namen erkennen. Nur bis zum letzten Zeilenumbruch verarbeiten (byte-sicher).
+  let last=-1;for(let i=fRaw.length-1;i>=0;i--){if(fRaw[i]===10||fRaw[i]===13){last=i;break;}}
+  if(last<0)return;                                    // noch keine ganze Zeile -> warten
+  const doneB=fRaw.subarray(0,last+1);fRaw=fRaw.subarray(last+1);
+  const t=bytesToLatin1(doneB).replace(/[^\x09\x0a\x0d\x20-\x7e]/g,"");
+  t.split(/\r?\n/).forEach(l=>{if(!l.trim())return;
+    const tm=l.match(/Timestamp:\s*(\d+)/i);
+    if(tm){if(fTsExpect)fSetDate(fTsExpect,+tm[1]);fNextDate();return;}   // 1 Datum pro Antwort (serialisiert)
+    const before=fSeen.size;fScanFile(l);
+    if(fSeen.size===before)append("[flipper] "+l,"line-sys");});}          // nur Nicht-Datei-Zeilen loggen (kein Flood)
+const FDIR="/ext/apps_data/marauder/pcaps";
+let fSeen=new Set(),fEntries=[],fBtns=new Map(),fRenderT=0,fDateQ=[],fTsExpect=null;
+function fmtSize(b){return b>=1048576?(b/1048576).toFixed(1)+" MB":b>=1024?Math.round(b/1024)+" kB":b+" B";}
+function fScanFile(line){
+  // NUR echte Datei-Basenamen: "[F] name size" oder bare "name.pcap" (Pfade/Echos raus)
+  let name=null,size=null;const m=line.match(/^\s*\[F\]\s+(\S+)\s+(\d+)\s*b?\s*$/i);  // Flipper: "[F] name 1234b"
+  if(m){name=m[1];size=+m[2];}else{const b=line.trim();if(/^[^\/\\\s]+\.pcap\w*$/i.test(b))name=b;}
+  if(!name||name.indexOf("/")>=0||!/\.pcap/i.test(name)||fSeen.has(name))return;
+  fSeen.add(name);fEntries.push({name:name,size:size});
+  clearTimeout(fRenderT);fRenderT=setTimeout(fRenderFiles,350);}
+function fIdx(n){const m=n.match(/(\d+)/g);return m?parseInt(m[m.length-1],10):0;}
+function fRenderFiles(){const box=$("fFiles");box.style.cssText="display:block;max-height:260px;overflow:auto";box.innerHTML="";fBtns.clear();
+  const all=fEntries.slice().sort((a,b)=>fIdx(b.name)-fIdx(a.name));    // neueste (hoechste Nummer) oben
+  const show=all.slice(0,60);
+  $("fFilesHint").style.display="";
+  $("fFilesHint").textContent=all.length+" PCAPs — neueste oben"+(all.length>60?" (zeige 60)":"")+", anklicken zum Laden:";
+  show.forEach(e=>{const b=document.createElement("button");b.className="btn primary";
+    b.style.cssText="padding:4px 8px;display:block;width:100%;text-align:left;margin:2px 0";
+    b.dataset.base="⬇ "+e.name+(e.size!=null?" ("+fmtSize(e.size)+")":"");b.textContent=b.dataset.base;
+    b.onclick=()=>fPull(FDIR+"/"+e.name);box.appendChild(b);fBtns.set(e.name,b);});
+  fDateQ=show.slice(0,10).map(e=>e.name);if(!fTsExpect)fNextDate();}     // Datum nur fuer 10 neueste (kein Flood)
+function fNextDate(){fTsExpect=null;if(fCap||fPend||!fDateQ.length)return;
+  fTsExpect=fDateQ.shift();fsend("storage timestamp "+FDIR+"/"+fTsExpect);}
+function fSetDate(name,unix){const b=fBtns.get(name);if(!b||!unix)return;
+  const d=new Date(unix*1000),p=n=>String(n).padStart(2,"0");
+  b.textContent=b.dataset.base+" — "+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());}
+function fPull(p){if(!/^\/ext\//.test(p)){append("Pfad muss mit /ext/ beginnen.","line-err");return;}
+  fDateQ=[];fTsExpect=null;                                             // Datum-Abfragen abbrechen
+  if(fCap||fPend){append("Läuft schon — kurz warten.","line-err");return;}
+  fPend={name:p};fRaw=new Uint8Array(0);append("Flipper: hole "+p+" ...","line-sys");fsend("storage read "+p);}
+let lastPcap=null;   // zuletzt geholte PCAP-Bytes (fuer lokalen Crack)
+function fFinishCap(){const c=fCap;fCap=null;lastPcap=c.got;
   const b=new Blob([c.got],{type:"application/vnd.tcpdump.pcap"});
   const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(c.name.split("/").pop()||"capture.pcap");a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
-  append("PCAP vom Flipper geladen: "+c.name+" ("+c.want+" B) -> heruntergeladen.","line-sys");}
+  append("PCAP vom Flipper geladen: "+c.name+" ("+c.want+" B) -> Download + für 'Lokal cracken' bereit.","line-sys");}
 $("fConnect").onclick=fconnect;
-$("fList").onclick=()=>{append("Flipper: liste PCAPs...","line-sys");fsend("storage list /ext/apps_data/marauder");};
-$("fPull").onclick=()=>{const p=$("fPath").value.trim();
-  if(!/^\/ext\//.test(p)){append("Pfad muss mit /ext/ beginnen (z.B. /ext/apps_data/marauder/x.pcap).","line-err");return;}
-  if(fCap||fPend){append("Capture läuft schon.","line-err");return;}
-  fPend={name:p};fRaw=new Uint8Array(0);append("Flipper: hole "+p+" ...","line-sys");fsend("storage read "+p);};
+$("fList").onclick=()=>{fSeen=new Set();fEntries=[];fBtns=new Map();fDateQ=[];fTsExpect=null;
+  $("fFiles").innerHTML="";$("fFilesHint").style.display="none";
+  append("Flipper: liste PCAPs...","line-sys");fsend("storage list "+FDIR);};
+$("fPull").onclick=()=>fPull($("fPath").value.trim());
+// Lokaler Python-Crack via serve.py /crack
+let crackPoll=0;
+$("crackRun").onclick=async()=>{
+  let bytes=null;const f=$("crackPcap").files[0];
+  if(f)bytes=new Uint8Array(await f.arrayBuffer());
+  else if(lastPcap)bytes=lastPcap;
+  if(!bytes){$("crackStatus").textContent="Keine PCAP — Datei wählen oder erst per Kanal 0 holen.";return;}
+  clearInterval(crackPoll);
+  const b64=btoa(bytesToLatin1(bytes)),mode=$("crackMode").value;
+  $("crackRun").disabled=true;$("crackStatus").textContent="starte...";
+  let j;
+  try{
+    const r=await fetch(location.origin+"/crack",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pcap_b64:b64,ssid:$("crackSsid").value.trim(),mode:mode,
+        wordlist_path:$("crackWl").value.trim(),dmin:+$("crackDmin").value,dmax:+$("crackDmax").value,
+        mask:$("crackMask").value.trim()})});
+    j=await r.json();
+  }catch(e){$("crackStatus").textContent="Fehler: "+e.message+" — läuft serve.py (nicht http.server)?";$("crackRun").disabled=false;return;}
+  if(!j.ok){$("crackStatus").textContent="Fehler: "+j.error;$("crackRun").disabled=false;return;}
+  append("Crack gestartet ["+j.engine+"] SSID="+j.ssid+" PMKID="+(j.have_pmkid?"ja":"nein"),"line-sys");
+  const jid=j.job_id,eng=j.engine;
+  crackPoll=setInterval(async()=>{
+    let s;try{s=await(await fetch(location.origin+"/crack_status?id="+jid)).json();}catch(e){return;}
+    const pct=s.total?(" · "+Math.min(100,Math.floor((s.tested||0)/s.total*100))+"%"):"";
+    if(!s.done){$("crackStatus").innerHTML="⏳ "+eng+" · getestet "+(s.tested||0).toLocaleString()+pct+" · "+(s.rate||0).toLocaleString()+"/s";return;}
+    clearInterval(crackPoll);$("crackRun").disabled=false;
+    if(s.error){$("crackStatus").textContent="Fehler: "+s.error;}
+    else if(s.found){$("crackStatus").innerHTML="✅ <b>Passwort: "+s.password+"</b> ("+(s.method||"")+") — "+eng;append("CRACK ✅ Passwort: "+s.password,"line-sys");}
+    else{$("crackStatus").innerHTML="❌ nicht gefunden ("+(s.tested||0).toLocaleString()+" getestet, "+eng+")";append("CRACK: nicht gefunden","line-sys");}
+  },800);};
+$("crackMaskPreset").onchange=()=>{const v=$("crackMaskPreset").value;if(v){$("crackMask").value=v;$("crackMode").value="mask";}};
+$("hcInstall").onclick=async()=>{
+  if(!confirm("hashcat (~50 MB) von GitHub laden und nach ./tools entpacken? Danach GPU-Cracking."))return;
+  $("hcInstall").disabled=true;$("crackStatus").textContent="hashcat wird geladen…";
+  let j;try{j=await(await fetch(location.origin+"/install_hashcat",{method:"POST"})).json();}
+  catch(e){$("crackStatus").textContent="Fehler: "+e.message+" — läuft serve.py?";$("hcInstall").disabled=false;return;}
+  if(!j.ok){$("crackStatus").textContent="Fehler: "+(j.error||"?");$("hcInstall").disabled=false;return;}
+  const jid=j.job_id,poll=setInterval(async()=>{
+    let s;try{s=await(await fetch(location.origin+"/crack_status?id="+jid)).json();}catch(e){return;}
+    if(!s.done){$("crackStatus").textContent="hashcat: "+(s.method||"läuft…");return;}
+    clearInterval(poll);$("hcInstall").disabled=false;
+    if(s.error)$("crackStatus").textContent="hashcat-Install-Fehler: "+s.error;
+    else{$("crackStatus").innerHTML="✅ hashcat installiert — GPU aktiv. Jetzt Lokal cracken drücken.";append("hashcat installiert: "+s.password,"line-sys");}
+  },1000);};
 
 // portal
 $("epStartFile").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c start -w "+f);};
