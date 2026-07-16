@@ -510,12 +510,16 @@
       <div class="panelbox">
         <div class="step" style="margin-top:0">B · Universal — Marauder-App flashen (jeder Chip)</div>
         <div class="hint">Für jeden ESP32, der schon einen Bootloader hat (Normalfall). Lädt die App deines Boards von GitHub und schreibt sie <b>@0x10000</b> — Bootloader/Partitionen bleiben erhalten. Chip wird beim Flashen erkannt.</div>
+        <button class="go" id="autoFlashBest" style="width:100%;margin-bottom:8px" title="Verbindet, erkennt den Chip und flasht automatisch den besten passenden Build (non-flipper, multiboard). Kein Auswählen nötig.">🎯 Auto: beste Firmware erkennen &amp; flashen</button>
         <div class="row">
           <button class="btn" id="fwList" style="flex:1">↻ Marauder-Builds laden</button>
-          <input type="text" id="fwSearch" placeholder="Board filtern: s3, cyd, flipper, c6, mini …" style="flex:1">
+          <select id="fwBoard" style="flex:1" title="Alle Board-Varianten aus der Release-Liste. Auswahl filtert + wählt automatisch den neuesten passenden Build."><option value="">— erst Liste laden —</option></select>
+        </div>
+        <div class="row">
+          <input type="text" id="fwSearch" placeholder="frei filtern: s3, cyd, flipper, c6, mini …" style="flex:1">
         </div>
         <select id="fwSelect" style="width:100%"><option>— erst Liste laden —</option></select>
-        <div class="hint" id="fwHint">Tipp: dein DevKitC-1 = <code>multiboardS3</code>. Andere: Boardname im Filter suchen.</div>
+        <div class="hint" id="fwHint">Board oben wählen (volle Liste) oder frei filtern. DevKitC-1 = <code>multiboardS3</code>. Unsicher? „🎯 Auto-Flash" erkennt den Chip selbst.</div>
         <div class="row">
           <button class="go" id="appFlash" style="flex:1" disabled>⚡ App flashen (@0x10000)</button>
           <button class="warnb" id="repairUni" style="flex:1" disabled>🛠 Voll-Reparatur (Bootloader+App)</button>
@@ -1002,6 +1006,17 @@ async function bootMode(){if(!port){append("Erst verbinden.","line-err");return;
 
 /* ---------- Flasher (esptool-js) ---------- */
 const flog=m=>append("[flash] "+m,"line-flash");
+// Native USB-Serial/JTAG (VID 303a PID 0002) unterstuetzt DTR/RTS-Reset oft nicht -> setSignals wirft.
+// Wir schlucken den Fehler (Reset wird No-op), damit esptool weiterlaeuft; Board ggf. manuell in Bootloader.
+function mkTransport(dev){const t=new Transport(dev,false);try{
+    const info=dev.getInfo?dev.getInfo():{};
+    if(info.usbVendorId===0x303a&&(info.usbProductId===0x0002||info.usbProductId===2))
+      flog("⚠ Natives USB-Serial/JTAG erkannt. Reset per DTR/RTS geht hier meist NICHT — falls 'Connecting...' haengt: BOOT halten + EN/RST tippen + BOOT los. Zuverlaessiger: den CH343-UART-Port waehlen.");
+    const d=t.device;if(d&&d.setSignals){const orig=d.setSignals.bind(d);let warned=false;
+      d.setSignals=async o=>{try{return await orig(o);}catch(e){if(!warned){warned=true;
+        flog("Reset per DTR/RTS nicht möglich (native USB) — Board muss manuell im Download-Modus sein: BOOT halten + RST tippen + BOOT los, dann erneut.");}}};}
+  }catch(_){}
+  return t;}
 const ESPTOOL_URLS=["https://unpkg.com/esptool-js@0.5.4/bundle.js","https://cdn.jsdelivr.net/npm/esptool-js@0.5.4/bundle.js"];
 async function loadEsptool(){if(esptoolReady)return true;
   for(const url of ESPTOOL_URLS){try{flog("lade esptool-js ...");const mod=await import(url);
@@ -1021,7 +1036,7 @@ async function autoRepair(){
   try{btn.disabled=true;$("prog").style.width="0%";
     if(port){flog("trenne Terminal...");await disconnect();}
     flog("verbinde... (Fehler? BOOT halten + EN tippen)");
-    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
     const baud=parseInt($("flashBaud").value,10);
     esploader=new ESPLoader({transport:flashTransport,baudrate:baud,terminal:espTerminal});
     const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
@@ -1049,7 +1064,7 @@ async function autoRepair(){
 
 async function flashConnect(){showView("flash");if(!(await loadEsptool()))return;
   try{if(port){flog("trenne Terminal...");await disconnect();}
-    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
     const baud=parseInt($("flashBaud").value,10);
     esploader=new ESPLoader({transport:flashTransport,baudrate:baud,terminal:espTerminal});
     flog("verbinde & erkenne ...");const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
@@ -1112,12 +1127,74 @@ function fwCheckPick(){const o=$("fwSelect").selectedOptions[0];if(!o)return;
   if(isFlipper(o.dataset.name||o.value||"")){
     $("fwStatus").innerHTML="⚠ <b>Flipper-Build gewählt.</b> Der ist NUR fürs Flipper-Zero-WLAN-Modul — auf einem Standalone-Board sind <code>scanap</code>/<code>scansta</code> tot. Für dein DevKitC-1 einen <b>multiboardS3</b>-Build ohne 'flipper' im Namen nehmen.";}
 }
+/* ---------- Automatische Firmware-Wahl nach erkanntem Chip ---------- */
+function chipTokens(k){return ({esp32s3:["s3"],esp32s2:["s2"],esp32c3:["c3"],esp32c5:["c5"],esp32c6:["c6"],esp32h2:["h2"]})[k]||[];}
+// Bewertet einen Build fuer den erkannten Chip: hoeher = besser. Flipper/falsche Familie stark abgewertet.
+function fwScore(name,chipKey){const n=(name||"").toLowerCase();let s=0;
+  if(isFlipper(n))s-=1000;                                   // nie auf Standalone-Board
+  if(chipKey==="esp32"){                                     // Classic: hat 'esp32', aber KEINE Variante
+    if(/(s2|s3|c2|c3|c5|c6|h2)/.test(n))s-=300;else if(/esp32/.test(n))s+=100;
+  }else{const toks=chipTokens(chipKey);
+    if(toks.some(t=>n.includes(t)))s+=100;else s-=300;}      // muss zur Chip-Familie passen
+  if(n.includes("multiboard"))s+=60;                         // generisch, laeuft auf den meisten Boards der Familie
+  if(/devkit|dev_?board/.test(n))s+=15;
+  if(/(cyd|lilygo|t-?display|marauderv|mini|pro)/.test(n))s-=10; // display-/board-spezifisch, ohne Sicherheit riskant
+  return s;}
+// Bester Build (Gleichstand: neueres Release; fwAssets ist nach Datum absteigend)
+function fwPickBest(chipKey){if(!fwAssets.length)return null;
+  let best=null,bs=-1e9;fwAssets.forEach((a,i)=>{const sc=fwScore(a.name,chipKey)-i*0.1;if(sc>bs){bs=sc;best=a;}});
+  return (best&&fwScore(best.name,chipKey)>-100)?best:null;}  // nur wenn Chip-Familie plausibel passt
+function fwSelectByUrl(url){$("fwSearch").value="";fwRender();
+  const sel=$("fwSelect");for(const o of sel.options)if(o.value===url){sel.value=url;break;}fwCheckPick();}
+// Board-Slug aus Dateiname (Teil nach dem Datum): esp32_marauder_v1_13_0_20260707_m5stickc_plus2.bin -> m5stickc_plus2
+function boardSlug(name){let m=name.match(/_\d{8}_(.+)\.bin$/i);if(m)return m[1];
+  m=name.match(/marauder_(?:v[\d._]+_)?(.+)\.bin$/i);return m?m[1]:name.replace(/\.bin$/i,"");}
+// Fuellt das Board-Dropdown mit allen einzigartigen Board-Varianten der Release-Liste
+function populateBoards(){const sel=$("fwBoard");if(!sel)return;const cur=sel.value;
+  const slugs=[...new Set(fwAssets.map(a=>boardSlug(a.name)))].sort((a,b)=>a.localeCompare(b));
+  sel.innerHTML='<option value="">— Board wählen ('+slugs.length+') —</option>';
+  slugs.forEach(s=>{const o=document.createElement("option");o.value=s;o.textContent=(isFlipper(s)?"⚠ ":"")+s;sel.appendChild(o);});
+  if(slugs.includes(cur))sel.value=cur;}
+// Board gewaehlt -> exakt filtern und neuesten passenden Build waehlen (fwAssets ist nach Datum absteigend)
+function onBoardPick(){const slug=$("fwBoard").value;if(!slug)return;
+  $("fwSearch").value=slug;fwRender();
+  const hit=fwAssets.find(a=>boardSlug(a.name)===slug);
+  if(hit){fwSelectByUrl(hit.url);$("fwStatus").innerHTML="Board: <b>"+slug+"</b> gewählt — neuester Build markiert. Jetzt <b>App flashen</b>.";}}
+// Voll-automatisch: verbinden -> Chip erkennen -> besten Build waehlen -> herunterladen -> @0x10000 flashen
+async function autoFlashBest(){if(!(await loadEsptool()))return;
+  const btn=$("autoFlashBest");if(btn)btn.disabled=true;
+  try{
+    if(!fwAssets.length){$("fwStatus").textContent="lade Build-Liste...";await fwList();}
+    if(!fwAssets.length){$("fwStatus").textContent="Keine Builds ladbar — Liste manuell laden (↻).";return;}
+    if(port){flog("trenne Terminal...");await disconnect();}
+    $("prog").style.width="0%";flog("Auto-Flash: verbinde + erkenne Chip (Fehler? BOOT halten + EN tippen)...");
+    const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
+    const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    const best=fwPickBest(detectedChip);
+    if(!best){$("fwStatus").innerHTML="⚠ Keine sichere Auto-Wahl für <b>"+detectedChip+"</b>. Bitte manuell aus der Liste wählen.";
+      try{await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;return;}
+    fwSelectByUrl(best.url);
+    flog("Auto-Wahl: "+best.name+" ("+best.tag+")");
+    $("fwStatus").innerHTML="Auto-Wahl: <b>"+best.name+"</b> — lade...";
+    const app=await fetchBin(best.url);flog("geladen: "+app.bytes+" B");
+    $("fwStatus").textContent="schreibe "+best.name+" @0x10000 ...";flog("schreibe @0x10000 (Bootloader bleibt)");
+    await esploader.writeFlash({fileArray:[{data:app.data,address:0x10000}],flashSize:"keep",flashMode:"keep",flashFreq:"keep",
+      eraseAll:false,compress:true,reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("App geschrieben ✓");
+    try{if(esploader.hardReset)await esploader.hardReset();}catch(e){}
+    try{await flashTransport.disconnect();}catch(e){}esploader=null;flashTransport=null;
+    $("fwStatus").innerHTML="✅ Auto-Flash fertig (<b>"+best.name+"</b>). Oben <b>Verbinden</b> @115200 → <code>scanap</code>.";flog("FERTIG ✓");
+  }catch(e){flog("Auto-Flash-Fehler: "+e.message);
+    $("fwStatus").textContent="Fehler: "+e.message+" — BOOT+EN? Läuft serve.py? Sonst manuell (C) / flasher.marauder.gg.";
+    try{if(flashTransport)await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;
+  }finally{if(btn)btn.disabled=false;}}
 async function fwList(){$("fwStatus").textContent="lade Build-Liste von GitHub ...";
   try{const r=await fetch(GH_API,{headers:{Accept:"application/vnd.github+json"}});if(!r.ok)throw new Error("HTTP "+r.status);
     const rels=await r.json();fwAssets=[];
     for(const rel of rels)for(const a of(rel.assets||[]))if(/\.bin$/i.test(a.name))
       fwAssets.push({name:a.name,url:a.browser_download_url,size:a.size,tag:rel.tag_name});
-    fwRender();$("fwStatus").textContent=fwAssets.length+" Builds geladen. Board im Filter suchen.";}
+    fwRender();populateBoards();$("fwStatus").textContent=fwAssets.length+" Builds geladen. Board oben wählen oder frei filtern.";}
   catch(e){$("fwStatus").textContent="Liste fehlgeschlagen ("+e.message+"). Rate-Limit? Später erneut, oder App manuell (C).";}}
 // GitHub-Release-Assets senden keine CORS-Header -> Direktversuch scheitert oft ("Failed to fetch").
 // Darum Kette: erst direkt (falls Ziel CORS liefert), dann mehrere CORS-Proxies der Reihe nach.
@@ -1159,7 +1236,7 @@ async function appFlash(){
     const app=await fetchBin(o.value);flog("App geladen: "+app.bytes+" B");
     if(port){flog("trenne Terminal...");await disconnect();}
     flog("verbinde... (Fehler? BOOT halten + EN tippen)");
-    const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
     esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
     const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
     $("fwStatus").textContent="schreibe App @0x10000 ...";flog("schreibe "+name+" @0x10000 (Bootloader bleibt)");
@@ -1185,7 +1262,7 @@ async function repairUni(){
     $("fwStatus").textContent="lade "+name+" ...";flog("Voll-Reparatur: lade App "+name);
     const app=await fetchBin(o.value);flog("App: "+app.bytes+" B");
     if(port){await disconnect();}
-    flog("verbinde...");const dev=await navigator.serial.requestPort();flashTransport=new Transport(dev,false);
+    flog("verbinde...");const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
     esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
     const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
     const P=window.FW_PARTS[detectedChip];
@@ -1431,6 +1508,8 @@ $("macroRun").onclick=macroRun;$("macroStop").onclick=()=>{macroAbort=true;};
 $("autoRepair").onclick=autoRepair;$("flashConnect").onclick=flashConnect;$("eraseFlash").onclick=eraseFlash;
 $("doFlash").onclick=doFlash;$("flashReset").onclick=flashReset;$("fwList").onclick=fwList;$("appFlash").onclick=appFlash;$("repairUni").onclick=repairUni;$("fwSearch").addEventListener("input",fwRender);
 $("fwSelect").addEventListener("change",fwCheckPick);
+$("fwBoard").addEventListener("change",onBoardPick);
+$("autoFlashBest").onclick=autoFlashBest;
 $("boardPreset").onchange=applyBoard;$("hwReset").onclick=hwReset;$("bootMode").onclick=bootMode;
 
 // console
