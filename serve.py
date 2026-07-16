@@ -18,6 +18,7 @@ import urllib.request
 import urllib.parse
 import sys
 import os
+import re
 import json
 import base64
 import struct
@@ -39,17 +40,60 @@ def host_allowed(host: str) -> bool:
 # Knackt PMKID (sniffpmkid) und 4-Way-Handshake (sniffdeauth) per Woerterbuch.
 # Nur fuer eigene / autorisierte Netze.
 
+def _strip_radiotap(frame, linktype):
+    if linktype == 127 and len(frame) >= 4:      # DLT_IEEE802_11_RADIO -> Radiotap-Header abschneiden
+        rtlen = int.from_bytes(frame[2:4], "little")
+        if 0 < rtlen <= len(frame):
+            return frame[rtlen:]
+    if linktype == 119 and len(frame) >= 4:      # DLT_PRISM_HEADER (144 Byte fix)
+        return frame[144:]
+    return frame                                 # 105 = reines 802.11
+
+
+def parse_pcapng(data):
+    """pcapng -> 802.11-Frames. Deckt SHB/IDB/EPB/SPB ab."""
+    n = len(data)
+    if n < 12:
+        return []
+    en = ">" if data[8:12] == b"\x1a\x2b\x3c\x4d" else "<"   # BOM roh 1A2B3C4D = big-endian
+
+    def u32(b):
+        return int.from_bytes(b, "big" if en == ">" else "little")
+
+    def u16(b):
+        return int.from_bytes(b, "big" if en == ">" else "little")
+    frames, off, linktype = [], 0, 105
+    while off + 12 <= n:
+        btype = u32(data[off:off + 4])
+        blen = u32(data[off + 4:off + 8])
+        if blen < 12 or off + blen > n:
+            break
+        body = data[off + 8:off + blen - 4]
+        if btype == 1 and len(body) >= 2:                 # IDB
+            linktype = u16(body[0:2])
+        elif btype == 6 and len(body) >= 20:              # EPB: intf(4)+ts_hi(4)+ts_lo(4)+caplen(4)+origlen(4)+data
+            caplen = u32(body[12:16])
+            frames.append(_strip_radiotap(body[20:20 + caplen], linktype))
+        elif btype == 3 and len(body) >= 4:               # SPB
+            origlen = u32(body[0:4])
+            frames.append(_strip_radiotap(body[4:4 + origlen], linktype))
+        off += blen
+    return frames
+
+
 def parse_pcap(data):
-    """Klassisches pcap -> Liste von 802.11-Frames (Radiotap entfernt)."""
+    """pcap ODER pcapng -> Liste von 802.11-Frames (Radiotap entfernt)."""
     if len(data) < 24:
         return []
     magic = data[:4]
+    if magic == b"\x0a\x0d\x0d\x0a":              # pcapng
+        return parse_pcapng(data)
     if magic == b"\xd4\xc3\xb2\xa1":
         en = "<"
     elif magic == b"\xa1\xb2\xc3\xd4":
         en = ">"
     else:
-        return []  # pcapng hier nicht unterstuetzt
+        return []
     linktype = struct.unpack(en + "I", data[20:24])[0]
     out = []
     off, n = 24, len(data)
@@ -58,14 +102,29 @@ def parse_pcap(data):
         off += 16
         if incl < 0 or off + incl > n:
             break
-        frame = data[off:off + incl]
+        out.append(_strip_radiotap(data[off:off + incl], linktype))
         off += incl
-        if linktype == 127 and len(frame) >= 4:      # DLT_IEEE802_11_RADIO
-            rtlen = struct.unpack("<H", frame[2:4])[0]
-            frame = frame[rtlen:]
-        # linktype 105 = reines 802.11 -> nichts abschneiden
-        out.append(frame)
     return out
+
+
+def pcap_debug(data):
+    """Diagnose: Magic, Linktype, Frame-/EAPOL-/Beacon-Zahl."""
+    d = {"bytes": len(data), "magic": data[:4].hex() if len(data) >= 4 else ""}
+    frames = parse_pcap(data)
+    d["frames"] = len(frames)
+    eapol = beacon = 0
+    for f in frames:
+        if len(f) < 24:
+            continue
+        ft = (f[0] >> 2) & 3
+        st = (f[0] >> 4) & 0xF
+        if ft == 0 and st in (5, 8):
+            beacon += 1
+        elif ft == 2 and b"\x88\x8e" in f[24:40]:
+            eapol += 1
+    d["beacons"] = beacon
+    d["eapol"] = eapol
+    return d
 
 
 def _tags(body):
@@ -101,15 +160,11 @@ def extract_wpa(frames):
         if ftype != 2:
             continue
         to_ds, from_ds = f[1] & 1, (f[1] >> 1) & 1
-        hdr = 24 + (6 if (to_ds and from_ds) else 0)
-        if subtype & 0x08:               # QoS-Data -> +2
-            hdr += 2
-        if len(f) < hdr + 8:
+        # Robust: LLC/SNAP+EAPOL-Marker direkt suchen (unabhaengig von QoS/HT/Header-Laenge)
+        j = f.find(b"\xaa\xaa\x03\x00\x00\x00\x88\x8e")
+        if j < 0:
             continue
-        llc = f[hdr:hdr + 8]
-        if llc[:6] != b"\xaa\xaa\x03\x00\x00\x00" or llc[6:8] != b"\x88\x8e":
-            continue
-        eapol = f[hdr + 8:]
+        eapol = f[j + 8:]
         if len(eapol) < 99 or eapol[1] != 3:   # EAPOL type 3 = Key
             continue
         # BSSID/STA aus Adressen
@@ -484,7 +539,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         if self.path.startswith("/crack_status"):
             return self._crack_status()
+        if self.path.startswith("/pentool?"):
+            return self._pentool("GET")
         return super().do_GET()
+
+    def _pentool(self, method):
+        """Proxy zu einem lokalen ESP32-Pentest-Tool (HTTP, z.B. risinek @192.168.4.1).
+        Nur private/lokale Hosts (kein offener Proxy). Umgeht CORS."""
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        url = qs.get("url", [""])[0]
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+        priv = host in ("localhost",) or bool(re.match(
+            r"^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)", host))
+        if not (url.lower().startswith("http://") and priv):
+            self.send_error(403, "nur lokale/private Hosts erlaubt")
+            return
+        try:
+            data = None
+            if method == "POST":
+                ln = int(self.headers.get("Content-Length", "0"))
+                data = self.rfile.read(ln) if ln else b""
+            req = urllib.request.Request(url, data=data, method=method, headers={"User-Agent": "MCC"})
+            with urllib.request.urlopen(req, timeout=30) as up:
+                body = up.read()
+                ct = up.headers.get("Content-Type", "application/octet-stream")
+            self.send_response(200)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            self.send_error(502, "Pentool-Fehler: %s" % e)
 
     def _send_json(self, obj, code=200):
         out = json.dumps(obj).encode("utf-8")
@@ -516,6 +602,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             threading.Thread(target=job_rockyou, args=(jid,), daemon=True).start()
             self._send_json({"ok": True, "job_id": jid})
             return
+        if path == "/pentool":
+            return self._pentool("POST")
         if path != "/crack":
             self.send_error(404)
             return
@@ -538,7 +626,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "keine SSID (im PCAP kein Beacon) — SSID oben eintragen"})
                 return
             if not have_pmkid and not have_hs:
-                self._send_json({"ok": False, "error": "kein PMKID/Handshake in dieser PCAP (leere Datei?)"})
+                dbg = pcap_debug(pcap)
+                self._send_json({"ok": False,
+                                 "error": "kein PMKID/Handshake gefunden — Debug: " + json.dumps(dbg),
+                                 "debug": dbg})
                 return
             cap = int(body.get("limit", 5000000))
             use_gpu = (hashcat_bin() is not None) and (body.get("engine") != "cpu")
@@ -578,8 +669,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(502, "Proxy-Fehler: %s" % e)
 
     def end_headers(self):
-        # statische Antworten ebenfalls CORS-frei fuer localhost-Nutzung
-        if not self.path.startswith("/proxy?"):
+        # API-Endpunkte setzen ACAO selbst -> hier nur fuer statische Dateien, sonst doppelter Header
+        api = self.path.startswith(("/proxy", "/crack", "/pentool", "/install_hashcat", "/get_rockyou"))
+        if not api:
             self.send_header("Access-Control-Allow-Origin", "*")
         super().end_headers()
 

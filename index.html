@@ -251,6 +251,8 @@
       <h3>Access Points (WLAN-Netze) <span class="tcount">(<span id="apCount">0</span>)</span>
         <button class="btn" id="apSelMarked" style="padding:4px 8px" title="Angehakte APs sind bereits Ziele — hier direkt zum Attack-Tab springen.">angehakte APs → Attack-Tab</button>
         <button class="btn" id="apClear" style="padding:4px 8px">Tabelle leeren</button>
+        <button class="btn" id="scanPcapSave" style="padding:4px 8px" title="Speichert alle gescannten APs/Stationen als .pcap (Beacons/Probes) — Wireshark-lesbar. Enthält KEINEN Handshake (nur Metadaten aus dem Scan).">⬇ Scan als PCAP</button>
+        <label style="margin-left:8px;font-size:12px" title="Zeigt nur realistische Ziele: starkes Signal (RSSI ≥ -75). Der ESP32 sieht eh nur 2,4 GHz; zuverlässig angreifbar sind nur APs, die du gut hörst."><input type="checkbox" id="apOnlyCrack"> nur realistische Ziele (starkes Signal)</label>
       </h3>
       <div class="hint">Ein Access Point = ein WLAN-Router/Netz. <b>select</b> in der Zeile markiert ihn als Ziel für Deauth / Beacon-Clone / Probe.</div>
       <div class="tablewrap">
@@ -337,10 +339,6 @@
         <button class="btn stop" id="capStop" data-cmd="stopscan" title="Capture beenden.">■ Stop</button>
       </div>
       <div class="hint" id="capStatus">Bereit. Nach dem Start auf <code>EAPOL</code>/<code>PMKID</code>/<code>handshake</code> im Log warten (wird hier grün gemeldet).</div>
-      <div class="row" style="margin-top:6px">
-        <button class="btn" id="pcapRec" title="Experimentell: schneidet rohe 802.11-Frame-Hex-Zeilen vom Serial mit und baut lokal eine .pcap (kein SD nötig). Funktioniert NUR mit Firmware, die Frame-Hex über USB ausgibt — Stock-Marauder tut das nicht.">⏺ Lokale PCAP-Aufnahme (experimentell)</button>
-        <button class="btn" id="pcapDl" title="Aufgenommene Frames als .pcap herunterladen (lokal, ohne SD)." disabled>⬇ PCAP (0)</button>
-      </div>
       <div class="hint">Cracken am PC (egal woher die .pcap kommt):<br><code>hcxpcapngtool -o hash.hc22000 dein.pcap</code> → <code>hashcat -m 22000 hash.hc22000 wortliste.txt</code></div>
 
       <h3>📥 PCAP direkt vom Flipper holen (Kanal 0 / CLI)</h3>
@@ -402,6 +400,25 @@
         <button class="btn" id="rockyouGet" title="Nur rockyou.txt (~134 MB) nach ./tools.">⬇ rockyou</button>
         <span class="hint" id="crackStatus">bereit</span>
       </div>
+
+      <h3>🛰 ESP32-Pentest-Tool (risinek, HTTP) — Erweiterung</h3>
+      <div class="hint">Für die Firmware <b>risinek/esp32-wifi-penetration-tool</b> (eigener WLAN-AP + HTTP-API, fängt echte Handshakes). PC ins ESP32-WLAN „<b>ManagementAP</b>" einloggen, dann hier die Capture-PCAP holen → cracken. Läuft über den serve.py-Proxy (nur lokale IPs). Der Rest (Marauder/Flipper) bleibt unberührt.</div>
+      <div class="row">
+        <label>Base-URL</label><input type="text" id="penBase" value="http://192.168.4.1" style="flex:1">
+      </div>
+      <div class="row">
+        <input type="text" id="penPath" placeholder="Pfad, z.B. /ap-list oder /run-attack" style="flex:1">
+        <select id="penMethod"><option>GET</option><option>POST</option></select>
+        <button class="btn" id="penSend">senden</button>
+      </div>
+      <div class="row">
+        <input type="text" id="penBody" placeholder="POST-Body (optional), z.B. timeout=30&method=3&type=2" style="flex:1">
+      </div>
+      <div class="row">
+        <input type="text" id="penPcapPath" value="/capture.pcap" style="flex:1">
+        <button class="btn primary" id="penPcap">⬇ Capture holen → cracken</button>
+      </div>
+      <div class="hint" id="penStatus">getrennt (PC muss im ESP32-„ManagementAP"-WLAN sein)</div>
 
       <div style="margin-top:20px">
         <button class="btn stop big" data-cmd="stopscan" style="width:100%" title="Beendet sofort jeden laufenden Angriff/Scan.">■ STOP — alle Angriffe/Scans beenden</button>
@@ -595,6 +612,7 @@
         <div class="step" style="margin-top:0">B · Universal — Marauder-App flashen (jeder Chip)</div>
         <div class="hint">Für jeden ESP32, der schon einen Bootloader hat (Normalfall). Lädt die App deines Boards von GitHub und schreibt sie <b>@0x10000</b> — Bootloader/Partitionen bleiben erhalten. Chip wird beim Flashen erkannt.</div>
         <button class="go" id="autoFlashBest" style="width:100%;margin-bottom:8px" title="Verbindet, erkennt den Chip und flasht automatisch den besten passenden Build (non-flipper, multiboard). Kein Auswählen nötig.">🎯 Auto: beste Firmware erkennen &amp; flashen</button>
+        <button class="btn" id="risinekFlash" style="width:100%;margin-bottom:8px" title="Flasht risinek/esp32-wifi-penetration-tool (nur ESP32 classic!). Ersetzt Marauder. Danach eigener WLAN-AP 'ManagementAP' + HTTP-Pentool (Attack-Tab).">🛰 risinek-Pentest-Tool flashen (nur ESP32 classic)</button>
         <div class="row">
           <button class="btn" id="fwList" style="flex:1">↻ Marauder-Builds laden</button>
           <select id="fwBoard" style="flex:1" title="Alle Board-Varianten aus der Release-Liste. Auswahl filtert + wählt automatisch den neuesten passenden Build."><option value="">— erst Liste laden —</option></select>
@@ -864,18 +882,11 @@ let capHits=0;
 let pcapFrames=[],pcapRec=false;
 function analyze(line){
   let m;
-  // Frame-Hex mitschneiden, wenn Aufnahme laeuft und Zeile wie ein reiner Hex-Dump aussieht
-  if(pcapRec){const t=line.trim();
-    if(/^[0-9a-fA-F]{2}([\s:]?[0-9a-fA-F]{2})+$/.test(t)){const hx=t.replace(/[^0-9a-fA-F]/g,"");
-      if(hx.length>=48&&hx.length%2===0){const b=new Uint8Array(hx.length/2);
-        for(let i=0;i<b.length;i++)b[i]=parseInt(hx.substr(i*2,2),16);
-        pcapFrames.push(b);const dl=$("pcapDl");if(dl){dl.disabled=false;dl.textContent="⬇ PCAP ("+pcapFrames.length+")";}
-        return;}}}
   // Capture-Status EHRLICH auswerten: "Complete EAPOL: N" ist ein Zaehler -> nur bei N>0 Erfolg.
   let cm2;
   if(cm2=line.match(/complete\s+eapol[:\s]+(\d+)/i)){const n=+cm2[1];const el=$("capStatus");
     if(el)el.innerHTML=n>0
-      ?("✅ <b>"+n+" kompletter EAPOL-Handshake(s)</b> erfasst. (Stock-Marauder: PCAP nur auf SD.)")
+      ?("✅ <b>"+n+" Handshake(s) erfasst</b> → auf der <b>Flipper-SD</b> gespeichert (neue sniffpmkid_*.pcap). Unten <b>PCAPs auflisten</b> → neueste holen → cracken.")
       :("⏳ Capture läuft — <b>Complete EAPOL: 0</b> (noch kein Handshake; Client muss sich neu verbinden).");
     return;}
   // echte Treffer-Meldungen (kein blosser Zaehler)
@@ -978,18 +989,26 @@ function cbCell(kind,e){const td=document.createElement("td");const c=document.c
     updMarks();renderTargets();};
   td.appendChild(c);return td;}
 function cell(v,cls){const td=document.createElement("td");if(cls)td.className=cls;td.textContent=(v??"")+"";return td;}
-function renderAp(){const tb=$("apRows");tb.innerHTML="";apList.forEach(e=>{const tr=document.createElement("tr");
-  tr.appendChild(cbCell("ap",e));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
-  tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");
-  td.appendChild(selBtn("select -a "+e.index,e.fw));
-  // Manueller Deauth ohne Firmware-select: funktioniert auch fuer passiv (sniffbeacon) gefundene APs
-  if(e.mac){const d=document.createElement("button");d.className="btn";d.style.cssText="padding:3px 8px;margin-left:4px";
-    d.textContent="deauth (MAC)";
-    d.title="Deauth ohne select: setzt AP-Kanal, dann attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff (trennt alle Clients dieses AP).";
-    d.onclick=async()=>{if(e.ch)await fire("channel -s "+e.ch);await fire("attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff");};
-    td.appendChild(d);}
-  tr.appendChild(td);tb.appendChild(tr);});
-  $("apCount").textContent=apList.length;updDashCounts();}
+// Band: der ESP32 sieht/greift nur 2,4 GHz (Kanal 1-14) an.
+function apBand24(e){return e.ch==null||e.ch<=14;}
+// "realistisches Ziel" = 2,4 GHz UND starkes Signal (RSSI >= -75) -> zuverlaessig angreifbar.
+function apCrackable(e){return apBand24(e)&&e.rssi!=null&&e.rssi>=-75;}
+function renderAp(){const tb=$("apRows");tb.innerHTML="";
+  const only=$("apOnlyCrack")&&$("apOnlyCrack").checked;let shown=0;
+  const rows=apList.slice().sort((a,b)=>((b.rssi==null?-999:b.rssi))-((a.rssi==null?-999:a.rssi)));  // staerkste zuerst
+  rows.forEach(e=>{const ok=apCrackable(e),band=apBand24(e);
+    if(only&&!ok)return;shown++;
+    const tr=document.createElement("tr");if(!ok)tr.style.opacity="0.5";  // schwach/5GHz: unsicheres Ziel
+    tr.appendChild(cbCell("ap",e));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
+    tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");
+    td.appendChild(selBtn("select -a "+e.index,e.fw));
+    if(e.mac&&band){const d=document.createElement("button");d.className="btn";d.style.cssText="padding:3px 8px;margin-left:4px";
+      d.textContent="deauth (MAC)";
+      d.title="Deauth ohne select: setzt AP-Kanal, dann attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff (trennt alle Clients dieses AP).";
+      d.onclick=async()=>{if(e.ch)await fire("channel -s "+e.ch);await fire("attack -t deauth -s "+e.mac+" -d ff:ff:ff:ff:ff:ff");};
+      td.appendChild(d);}
+    tr.appendChild(td);tb.appendChild(tr);});
+  $("apCount").textContent=only?(shown+"/"+apList.length):apList.length;updDashCounts();}
 function renderSta(){const tb=$("staRows");tb.innerHTML="";staList.forEach(e=>{const tr=document.createElement("tr");
   tr.appendChild(cbCell("sta",e));[e.index,e.rssi,e.ch].forEach(v=>tr.appendChild(cell(v)));
   tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));const td=document.createElement("td");td.appendChild(selBtn("select -c "+e.index,e.fw));tr.appendChild(td);tb.appendChild(tr);});
@@ -1370,6 +1389,40 @@ async function fetchBin(rawUrl){
   }
   throw new Error("Download fehlgeschlagen: "+last+" — alle Quellen/Proxies erschoepft. Nutze manuell (C) oder flasher.marauder.gg.");}
 
+/* risinek/esp32-wifi-penetration-tool flashen (nur ESP32 classic) — Voll-Flash bootloader+part+app */
+async function flashRisinek(){
+  if(!(await loadEsptool()))return;
+  const btn=$("risinekFlash");if(btn)btn.disabled=true;
+  const base="https://github.com/risinek/esp32-wifi-penetration-tool/releases/download/v1.0/";
+  try{
+    $("fwStatus").textContent="risinek: lade 3 Images...";flog("risinek: lade bootloader/partition/app...");
+    const bl=await fetchBin(base+"bootloader.bin");
+    const pt=await fetchBin(base+"partition-table.bin");
+    const app=await fetchBin(base+"esp32-wifi-penetration-tool.bin");
+    flog("geladen: bl="+bl.bytes+" pt="+pt.bytes+" app="+app.bytes+" B");
+    if(port){flog("trenne Terminal...");await disconnect();}
+    flog("verbinde... (Fehler? BOOT halten + EN tippen)");
+    const dev=await navigator.serial.requestPort();flashTransport=mkTransport(dev);
+    esploader=new ESPLoader({transport:flashTransport,baudrate:parseInt($("flashBaud").value,10),terminal:espTerminal});
+    const chip=await esploader.main();flog("Chip: "+chip);setDetectedChip(chip);
+    if(detectedChip!=="esp32"){   // risinek v1.0 = nur ESP32 classic
+      $("fwStatus").innerHTML="⚠ risinek v1.0 ist NUR für ESP32 <b>classic</b> — dein <b>"+detectedChip+"</b> würde damit NICHT booten. Abgebrochen (nichts geschrieben).";
+      flog("Abbruch: risinek nur classic, erkannt "+detectedChip);
+      try{await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;return;}
+    $("fwStatus").textContent="schreibe risinek...";flog("schreibe bootloader@0x1000, partitions@0x8000, app@0x10000");
+    await esploader.writeFlash({fileArray:[
+      {data:bl.data,address:0x1000},{data:pt.data,address:0x8000},{data:app.data,address:0x10000}],
+      flashSize:"keep",flashMode:"keep",flashFreq:"keep",eraseAll:false,compress:true,
+      reportProgress:(i,w,t)=>{$("prog").style.width=Math.round(w/t*100)+"%";}});
+    $("prog").style.width="100%";flog("risinek geschrieben ✓");
+    try{if(esploader.hardReset)await esploader.hardReset();}catch(e){}
+    try{await flashTransport.disconnect();}catch(e){}esploader=null;flashTransport=null;
+    $("fwStatus").innerHTML="✅ risinek geflasht. ESP32 macht WLAN-AP <b>ManagementAP</b> auf → PC dort einloggen → Attack-Tab → <b>ESP32-Pentest-Tool</b>.";flog("risinek FERTIG ✓");
+  }catch(e){flog("risinek-Fehler: "+e.message);
+    $("fwStatus").textContent="Fehler: "+e.message+" — BOOT+EN? serve.py? Sonst manuell (C).";
+    try{if(flashTransport)await flashTransport.disconnect();}catch(_){}esploader=null;flashTransport=null;
+  }finally{if(btn)btn.disabled=false;}}
+
 /* App-Only-Flash @0x10000 (universal, jeder Chip mit vorhandenem Bootloader) */
 async function appFlash(){
   const o=$("fwSelect").selectedOptions[0];if(!o||!o.value){$("fwStatus").textContent="erst Build wählen.";return;}
@@ -1605,6 +1658,22 @@ $("pmkidBtn").onclick=()=>fire("sniffpmkid -c "+$("pmkidCh").value+" -d");
 $("ssidGenBtn").onclick=()=>fire("ssid -a -g "+$("ssidGen").value);
 $("ssidNameBtn").onclick=()=>{const n=$("ssidName").value.trim();if(n)fire("ssid -a -n "+n);};
 $("apClear").onclick=()=>{apList=[];renderAp();saveState();};
+$("apOnlyCrack").addEventListener("change",renderAp);
+$("scanPcapSave").onclick=saveScanPcap;
+// ESP32-Pentool (risinek, HTTP) via serve.py-Proxy
+function penUrl(p){const b=$("penBase").value.trim().replace(/\/+$/,"");return b+(p&&p.startsWith("/")?p:"/"+(p||""));}
+$("penSend").onclick=async()=>{const m=$("penMethod").value,u=penUrl($("penPath").value.trim());
+  $("penStatus").textContent="sende…";
+  try{const opt={method:m};if(m==="POST"){opt.headers={"Content-Type":"application/x-www-form-urlencoded"};opt.body=$("penBody").value;}
+    const r=await fetch(location.origin+"/pentool?url="+encodeURIComponent(u),opt);const t=await r.text();
+    $("penStatus").textContent=(r.ok?"OK: ":"HTTP "+r.status+": ")+t.slice(0,300);append("[pentool] "+t.slice(0,500),"line-sys");}
+  catch(e){$("penStatus").textContent="Fehler: "+e.message+" — serve.py? PC im ESP32-AP?";}};
+$("penPcap").onclick=async()=>{const u=penUrl($("penPcapPath").value.trim()||"/capture.pcap");
+  $("penStatus").textContent="hole PCAP…";
+  try{const r=await fetch(location.origin+"/pentool?url="+encodeURIComponent(u));if(!r.ok)throw new Error("HTTP "+r.status);
+    const buf=new Uint8Array(await r.arrayBuffer());if(buf.length<24)throw new Error("leer/zu klein ("+buf.length+" B)");
+    lastPcap=buf;$("penStatus").innerHTML="✅ PCAP geladen ("+buf.length+" B) → unten <b>Lokal cracken</b> (Datei-Feld leer lassen).";append("Pentool-PCAP: "+buf.length+" B geladen","line-sys");}
+  catch(e){$("penStatus").textContent="Fehler: "+e.message+" — PC im ESP32-AP? serve.py läuft?";}};
 $("staClear").onclick=()=>{staList=[];renderSta();saveState();};
 $("bleClear").onclick=()=>{bleList=[];renderBle();saveState();};
 $("apSelMarked").onclick=()=>{if(!apTargets.size){append("Erst APs anhaken.","line-err");return;}showView("atk");};
@@ -1638,14 +1707,26 @@ function buildPcap(frames){let tot=24;frames.forEach(f=>tot+=16+f.length);
   frames.forEach(f=>{dv.setUint32(o,now,true);dv.setUint32(o+4,0,true);dv.setUint32(o+8,f.length,true);dv.setUint32(o+12,f.length,true);o+=16;
     new Uint8Array(buf,o,f.length).set(f);o+=f.length;});
   return buf;}
-$("pcapRec").onclick=()=>{pcapRec=!pcapRec;$("pcapRec").textContent=pcapRec?"⏹ Aufnahme läuft…":"⏺ Lokale PCAP-Aufnahme (experimentell)";
-  append(pcapRec?"Lokale PCAP-Aufnahme AN — rohe Frame-Hex-Zeilen werden gesammelt. (Nur wenn Firmware Frame-Hex ausgibt.)":"PCAP-Aufnahme AUS.","line-sys");};
-$("pcapDl").onclick=()=>{if(!pcapFrames.length){append("Keine Frames aufgenommen — diese Firmware gibt keine Frame-Hex über USB aus. Ohne SD kein Handshake-Export.","line-err");return;}
-  const b=new Blob([buildPcap(pcapFrames)],{type:"application/vnd.tcpdump.pcap"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="marauder_capture.pcap";a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
-  append("PCAP mit "+pcapFrames.length+" Frames heruntergeladen.","line-sys");};
 renderTargets();
+// ---- Frontend-PCAP aus Scan-Daten (Beacons/Probes) — echte, Wireshark-lesbare Datei ----
+function _mac2b(m){const p=(m||"").split(":");if(p.length!==6)return null;
+  const b=p.map(x=>parseInt(x,16));return b.some(isNaN)?null:b;}
+function _beacon(e){const b=_mac2b(e.mac);if(!b)return null;
+  const ssid=e.name?Array.from(new TextEncoder().encode(e.name)).slice(0,32):[];
+  const ch=(e.ch&&e.ch<=14)?e.ch:1;
+  return Uint8Array.from([0x80,0x00,0,0,255,255,255,255,255,255,...b,...b,0,0,
+    0,0,0,0,0,0,0,0,0x64,0x00,0x11,0x04, 0,ssid.length,...ssid, 3,1,ch]);}
+function _probe(e){const b=_mac2b(e.mac);if(!b)return null;
+  return Uint8Array.from([0x40,0x00,0,0,255,255,255,255,255,255,...b,255,255,255,255,255,255,0,0, 0,0]);}
+function saveScanPcap(){
+  const fr=[];
+  apList.forEach(e=>{const f=_beacon(e);if(f)fr.push(f);});
+  staList.forEach(e=>{const f=_probe(e);if(f)fr.push(f);});
+  if(!fr.length){append("Keine Scan-Daten zum Speichern — erst scannen.","line-err");return;}
+  const blob=new Blob([buildPcap(fr)],{type:"application/vnd.tcpdump.pcap"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="marauder_scan.pcap";a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  append("PCAP gespeichert: "+fr.length+" Frames (Beacons/Probes aus Scan) → Wireshark. Hinweis: enthält KEINEN Handshake (nur Metadaten).","line-sys");}
 
 /* ---------- Flipper-CLI (Kanal 0): zweite Serial-Verbindung, PCAP per 'storage read' holen ---------- */
 let fport=null,freader=null,fwriter=null,fKeep=false;
@@ -1845,6 +1926,7 @@ $("fwBeta").addEventListener("change",()=>{if(fwAssets.length||$("fwBeta").check
 $("opMode").addEventListener("change",()=>setOpMode($("opMode").value));
 setOpMode(opMode);  // beim Laden Modus + Texte synchronisieren
 $("autoFlashBest").onclick=autoFlashBest;
+$("risinekFlash").onclick=flashRisinek;
 $("boardPreset").onchange=applyBoard;$("hwReset").onclick=hwReset;$("bootMode").onclick=bootMode;
 
 // console
