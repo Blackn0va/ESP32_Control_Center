@@ -327,6 +327,34 @@
         <button class="btn atk" data-cmd="attack -t probe" title="Probe-Request-Flut für gewählte APs (select -a).">probe flood (gewählte APs)</button>
       </div>
 
+      <h3>🔓 WPA-Handshake / PMKID Capture (für PCAP-Cracking)</h3>
+      <div class="warnbox" id="capSdNote" style="border-color:var(--border)"></div>
+      <div class="hint"><b>Kurz:</b> <code>Capture starten</code> = deauth + Handshake-Sniff. Wo die .pcap landet, steht im Banner oben. <b>Nur eigene / autorisierte Netze.</b></div>
+      <div class="warnbox" style="border-color:var(--border);background:var(--panel);color:var(--muted)" id="capTargetInfo">Kein AP-Ziel gewählt — im WiFi-Tab AP anhaken (setzt Kanal automatisch), oder Kanal unten manuell.</div>
+      <div class="row">
+        <label>Kanal</label><input type="number" id="capCh" value="1" min="1" max="14" style="width:70px">
+        <button class="btn atk" id="capStart" title="Setzt den Kanal und startet sniffpmkid -c <ch> -d (Sniff + Deauth). PCAP landet auf SD.">🔓 Capture starten</button>
+        <button class="btn stop" id="capStop" data-cmd="stopscan" title="Capture beenden.">■ Stop</button>
+      </div>
+      <div class="hint" id="capStatus">Bereit. Nach dem Start auf <code>EAPOL</code>/<code>PMKID</code>/<code>handshake</code> im Log warten (wird hier grün gemeldet).</div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn" id="pcapRec" title="Experimentell: schneidet rohe 802.11-Frame-Hex-Zeilen vom Serial mit und baut lokal eine .pcap (kein SD nötig). Funktioniert NUR mit Firmware, die Frame-Hex über USB ausgibt — Stock-Marauder tut das nicht.">⏺ Lokale PCAP-Aufnahme (experimentell)</button>
+        <button class="btn" id="pcapDl" title="Aufgenommene Frames als .pcap herunterladen (lokal, ohne SD)." disabled>⬇ PCAP (0)</button>
+      </div>
+      <div class="hint">Cracken am PC (egal woher die .pcap kommt):<br><code>hcxpcapngtool -o hash.hc22000 dein.pcap</code> → <code>hashcat -m 22000 hash.hc22000 wortliste.txt</code></div>
+
+      <h3>📥 PCAP direkt vom Flipper holen (Kanal 0 / CLI)</h3>
+      <div class="hint">Flipper hat <b>2 USB-Serial-Kanäle</b>: Kanal 1 = Marauder (oben verbinden), <b>Kanal 0 = Flipper-CLI</b>. Hier Kanal 0 verbinden → <code>.pcap</code> direkt über USB laden (kein qFlipper). Beides parallel möglich.</div>
+      <div class="row">
+        <button class="btn" id="fConnect">Flipper-CLI verbinden (Kanal 0)</button>
+        <button class="btn" id="fList" disabled>PCAPs auflisten</button>
+        <span class="hint" id="fState">getrennt</span>
+      </div>
+      <div class="row">
+        <input type="text" id="fPath" placeholder="/ext/apps_data/marauder/xxx.pcap" style="flex:1">
+        <button class="btn primary" id="fPull" disabled>⬇ diese PCAP holen</button>
+      </div>
+
       <div style="margin-top:20px">
         <button class="btn stop big" data-cmd="stopscan" style="width:100%" title="Beendet sofort jeden laufenden Angriff/Scan.">■ STOP — alle Angriffe/Scans beenden</button>
       </div>
@@ -456,6 +484,7 @@
             <option value="stascan">APs + Stationen</option>
             <option value="fullrecon">Voll-Recon (AP+STA+SSID+BLE)</option>
             <option value="pmkid_hunt">PMKID/Handshake-Jagd (alle Kanäle)</option>
+            <option value="handshake">WPA-Handshake Capture (Kanal 11, PCAP→SD)</option>
             <option value="probe_recon">Probe-Requests sammeln</option>
           </optgroup>
           <optgroup label="BLE">
@@ -508,6 +537,13 @@
 
       <!-- B: universal app flash -->
       <div class="panelbox">
+        <div class="row" style="margin:0 0 8px">
+          <label title="Wie hängt das Board am PC?">Betriebsmodus</label>
+          <select id="opMode" style="flex:1">
+            <option value="standalone">Standalone — ESP32 direkt an USB/UART</option>
+            <option value="flipper">Über Flipper Zero — ESP32 am Flipper (UART), Flipper-SD</option>
+          </select>
+        </div>
         <div class="step" style="margin-top:0">B · Universal — Marauder-App flashen (jeder Chip)</div>
         <div class="hint">Für jeden ESP32, der schon einen Bootloader hat (Normalfall). Lädt die App deines Boards von GitHub und schreibt sie <b>@0x10000</b> — Bootloader/Partitionen bleiben erhalten. Chip wird beim Flashen erkannt.</div>
         <button class="go" id="autoFlashBest" style="width:100%;margin-bottom:8px" title="Verbindet, erkennt den Chip und flasht automatisch den besten passenden Build (non-flipper, multiboard). Kein Auswählen nötig.">🎯 Auto: beste Firmware erkennen &amp; flashen</button>
@@ -515,6 +551,7 @@
           <button class="btn" id="fwList" style="flex:1">↻ Marauder-Builds laden</button>
           <select id="fwBoard" style="flex:1" title="Alle Board-Varianten aus der Release-Liste. Auswahl filtert + wählt automatisch den neuesten passenden Build."><option value="">— erst Liste laden —</option></select>
         </div>
+        <label style="font-size:12px" title="Instabile Vorabversionen (können Boot-Loop verursachen). Standard: aus, nur stabile Releases."><input type="checkbox" id="fwBeta"> Beta/Nightly einbeziehen (instabil)</label>
         <div class="row">
           <input type="text" id="fwSearch" placeholder="frei filtern: s3, cyd, flipper, c6, mini …" style="flex:1">
         </div>
@@ -731,9 +768,15 @@ function applyFilter(div){const q=$("search").value.toLowerCase(),rxOnly=$("rxOn
   if(rxOnly&&!div.classList.contains("line-rx"))s=false;
   if(s&&q&&!div.textContent.toLowerCase().includes(q))s=false;div.classList.toggle("hidden",!s);}
 function trimLines(){const m=parseInt($("maxLines").value,10)||3000;while(logEl.childElementCount>m)logEl.removeChild(logEl.firstChild);}
-function append(text,cls){const div=document.createElement("div");div.className=cls;
-  if($("showTs").checked){const t=document.createElement("span");t.className="ts";t.textContent="["+nowStr()+"] ";div.appendChild(t);}
-  div.appendChild(document.createTextNode(text));logEl.appendChild(div);applyFilter(div);trimLines();
+// Append gepuffert: bei Sniff-Flut nicht pro Zeile ins DOM, sondern 1x pro Frame als Fragment.
+let _logQ=[],_logRAF=0;
+function append(text,cls){_logQ.push([text,cls]);if(!_logRAF)_logRAF=requestAnimationFrame(flushLog);}
+function flushLog(){_logRAF=0;const q=_logQ;_logQ=[];if(!q.length)return;
+  const show=$("showTs").checked,ts=show?nowStr():null,frag=document.createDocumentFragment();
+  for(const it of q){const div=document.createElement("div");div.className=it[1];
+    if(show){const t=document.createElement("span");t.className="ts";t.textContent="["+ts+"] ";div.appendChild(t);}
+    div.appendChild(document.createTextNode(it[0]));applyFilter(div);frag.appendChild(div);}
+  logEl.appendChild(frag);trimLines();
   if($("autoscroll").checked)logEl.scrollTop=logEl.scrollHeight;
   maybeSaveLog();}
 function toHex(b){return Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join(" ");}
@@ -768,8 +811,28 @@ function parseEntry(line){
   return {index:idx,rssi,ch,mac,name};
 }
 function upsert(arr,e){const i=arr.findIndex(x=>x.index===e.index&&x.mac===e.mac);if(i>=0)arr[i]=e;else arr.push(e);arr.sort((a,b)=>a.index-b.index);}
+let capHits=0;
+// Lokaler PCAP-Recorder: sammelt rohe 802.11-Frame-Hex-Zeilen (falls Firmware sie ausgibt) -> Download ohne SD
+let pcapFrames=[],pcapRec=false;
 function analyze(line){
   let m;
+  // Frame-Hex mitschneiden, wenn Aufnahme laeuft und Zeile wie ein reiner Hex-Dump aussieht
+  if(pcapRec){const t=line.trim();
+    if(/^[0-9a-fA-F]{2}([\s:]?[0-9a-fA-F]{2})+$/.test(t)){const hx=t.replace(/[^0-9a-fA-F]/g,"");
+      if(hx.length>=48&&hx.length%2===0){const b=new Uint8Array(hx.length/2);
+        for(let i=0;i<b.length;i++)b[i]=parseInt(hx.substr(i*2,2),16);
+        pcapFrames.push(b);const dl=$("pcapDl");if(dl){dl.disabled=false;dl.textContent="⬇ PCAP ("+pcapFrames.length+")";}
+        return;}}}
+  // Capture-Status EHRLICH auswerten: "Complete EAPOL: N" ist ein Zaehler -> nur bei N>0 Erfolg.
+  let cm2;
+  if(cm2=line.match(/complete\s+eapol[:\s]+(\d+)/i)){const n=+cm2[1];const el=$("capStatus");
+    if(el)el.innerHTML=n>0
+      ?("✅ <b>"+n+" kompletter EAPOL-Handshake(s)</b> erfasst. (Stock-Marauder: PCAP nur auf SD.)")
+      :("⏳ Capture läuft — <b>Complete EAPOL: 0</b> (noch kein Handshake; Client muss sich neu verbinden).");
+    return;}
+  // echte Treffer-Meldungen (kein blosser Zaehler)
+  if(/pmkid.*(captur|found|got|saved)|handshake.*(captur|complete|saved)|saved.*\.pcap/i.test(line)){capHits++;
+    const el=$("capStatus");if(el)el.innerHTML="✅ Treffer #"+capHits+": <b>"+cleanPrintable(line).slice(0,90)+"</b>";}
   if(m=line.match(/Marauder\s+v?\.?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i))setBadge("fw","v"+m[1]);
   if(/esp32-?s3/i.test(line))setBadge("chip","ESP32-S3");
   else if(/esp32-?s2/i.test(line))setBadge("chip","ESP32-S2");
@@ -785,7 +848,7 @@ function analyze(line){
     const m=line.match(/^Device:\s*(.*?)-(\d{1,3})\s*$/);
     if(m){const tok=(m[1]||"").trim();const rssi=-parseInt(m[2],10);
       if(tok){const isMac=/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(tok);
-        upsertBle(isMac?"":tok,isMac?tok:"",rssi);renderBle();}}
+        upsertBle(isMac?"":tok,isMac?tok:"",rssi);scheduleRender("ble");}}
     return;
   }
   // Universeller Parser: JEDE Zeile mit MAC -> passende Tabelle
@@ -807,16 +870,16 @@ function analyze(line){
     let tgt;
     if(isSta&&!isAp)tgt="sta";else if(isAp)tgt="ap";
     else tgt=(listMode==="sta"?"sta":listMode==="ble"?"ble":"ap");
-    if(tgt==="sta"){upsertMac(staList,{rssi,ch,mac,name},fwIdx);renderSta();}
-    else if(tgt==="ap"){upsertMac(apList,{rssi,ch,mac,name},fwIdx);renderAp();}
-    else if(tgt==="ble"){upsertMac(bleList,{rssi,mac,name},fwIdx);renderBle();}
+    if(tgt==="sta"){upsertMac(staList,{rssi,ch,mac,name},fwIdx);scheduleRender("sta");}
+    else if(tgt==="ap"){upsertMac(apList,{rssi,ch,mac,name},fwIdx);scheduleRender("ap");}
+    else if(tgt==="ble"){upsertMac(bleList,{rssi,mac,name},fwIdx);scheduleRender("ble");}
     maybeSaveState();return;
   }
   // list -a mit Index aber ohne MAC (SSID-only Zeilen) -> Fallback
   const parse=(listMode==="ap"||listMode==="sta")&&performance.now()<listModeUntil;
   if(parse){const e=parseEntry(line);if(e){
-    if(listMode==="ap"){upsert(apList,e);renderAp();maybeSaveState();}
-    else if(listMode==="sta"){upsert(staList,e);renderSta();maybeSaveState();}
+    if(listMode==="ap"){upsert(apList,e);scheduleRender("ap");maybeSaveState();}
+    else if(listMode==="sta"){upsert(staList,e);scheduleRender("sta");maybeSaveState();}
   }}
 }
 function upsertMac(arr,e,fwIdx){const i=arr.findIndex(x=>x.mac&&x.mac.toLowerCase()===e.mac.toLowerCase());
@@ -886,6 +949,10 @@ function renderSta(){const tb=$("staRows");tb.innerHTML="";staList.forEach(e=>{c
 function renderBle(){const tb=$("bleRows");tb.innerHTML="";bleList.forEach(e=>{const tr=document.createElement("tr");
   [e.index,e.rssi].forEach(v=>tr.appendChild(cell(v)));tr.appendChild(cell(e.mac,"mac"));tr.appendChild(cell(e.name));tb.appendChild(tr);});
   $("bleCount").textContent=bleList.length;}
+// Tabellen-Rebuild ist teuer -> bei Sniff-Flut nur ~4x/s statt pro Zeile (verhindert Tab-Crash)
+let _rD={ap:false,sta:false,ble:false},_rT=0;
+function scheduleRender(w){_rD[w]=true;if(_rT)return;
+  _rT=setTimeout(()=>{_rT=0;if(_rD.ap){_rD.ap=false;renderAp();}if(_rD.sta){_rD.sta=false;renderSta();}if(_rD.ble){_rD.ble=false;renderBle();}},250);}
 function updMarks(){$("aMarkAp").textContent=apTargets.size;$("aMarkSta").textContent=staTargets.size;}
 // Zeigt die gewaehlten Ziele im Attack-Tab; carry-over aus dem WiFi-Tab
 function renderTargets(){const el=$("atkTargets");if(!el)return;
@@ -901,7 +968,10 @@ function renderTargets(){const el=$("atkTargets");if(!el)return;
   $("atkClearTargets").onclick=()=>{apTargets.clear();staTargets.clear();renderAp();renderSta();updMarks();renderTargets();};
   // nur den passenden Deauth-Button aktiv lassen -> kein Fehlklick
   const a=$("atkDeauthAp"),s=$("atkDeauthSta");
-  if(a)a.disabled=!apTargets.size;if(s)s.disabled=!staTargets.size;}
+  if(a)a.disabled=!apTargets.size;if(s)s.disabled=!staTargets.size;
+  // Capture-Ziel-Info + Kanal vom ersten AP-Ziel uebernehmen
+  const ci=$("capTargetInfo");if(ci){if(ap.length){const t=ap[0];ci.innerHTML="Capture-Ziel: <code>"+t.mac+"</code>"+(t.name?" ("+t.name+")":"")+(t.ch?" · Ch "+t.ch:"");if(t.ch&&$("capCh"))$("capCh").value=t.ch;}
+    else ci.textContent="Kein AP-Ziel gewählt — im WiFi-Tab AP anhaken (setzt Kanal automatisch), oder Kanal unten manuell.";}}
 
 /* ---------- Serial ---------- */
 async function connect(){
@@ -1109,29 +1179,48 @@ function setDetectedChip(str){detectedChip=chipKey(str);
   if($("boardPreset").value==="auto")applyBoard();}
 
 /* ---------- FW-Liste (alle Boards) ---------- */
-const GH_API="https://api.github.com/repos/justcallmekoko/ESP32Marauder/releases?per_page=8";
+const GH_API="https://api.github.com/repos/justcallmekoko/ESP32Marauder/releases?per_page=30";
 let fwAssets=[];
 const isFlipper=n=>/flipper/i.test(n);
+// Betriebsmodus: "standalone" (ESP32 direkt) | "flipper" (ESP32 via UART am Flipper, WiFi-Marauder-App, Flipper-SD)
+let opMode=localStorage.getItem("mccOpMode")||"standalone";
+function setOpMode(m){opMode=m;try{localStorage.setItem("mccOpMode",m);}catch(_){}
+  const sel=$("opMode");if(sel&&sel.value!==m)sel.value=m;
+  updModeUI();if(fwAssets.length)fwRender();}
+function updModeUI(){const flip=opMode==="flipper";
+  const cw=$("capSdNote");if(cw){cw.style.borderColor="var(--red)";
+    cw.innerHTML=flip
+      ?"<b>Dein Setup (nur TX/RX/3V/GND):</b> der ESP32 hat KEINE SD → <code>SD not found</code> ist normal. PCAP speichert nur der Flipper selbst.<br><b>So gehts:</b> 1) Am <b>Flipper</b>: Apps → GPIO → <b>[ESP32] WiFi Marauder</b> öffnen. 2) Dort den Sniff starten (nicht hier) → Flipper schreibt die <code>.pcap</code> auf seine SD. 3) <b>qFlipper</b> → Ordner <code>apps_data/marauder/</code> → Datei auf den PC → cracken (unten)."
+      :"<b>Standalone:</b> braucht eine microSD am ESP32-Board. Ohne SD kein Handshake-Export — nur Zähler über USB. Alternativ über Flipper betreiben (Modus oben).";}
+  const fh=$("fwHint");if(fh)fh.innerHTML=flip
+    ?"<b>Flipper-Modus:</b> nimm den <b>_flipper</b>-Build (ESP32 am Flipper). Auto-Flash bevorzugt ihn. Flashen aber am besten direkt am Board (UART/CH343), nicht durch den Flipper."
+    :"<b>Standalone:</b> non-flipper Build (DevKitC-1 = <code>multiboardS3</code>). Auto-Flash erkennt den Chip selbst.";}
 function fwRender(){const q=$("fwSearch").value.toLowerCase();const sel=$("fwSelect");sel.innerHTML="";
+  const flip=opMode==="flipper";
   let list=fwAssets.filter(a=>a.name.toLowerCase().includes(q));
-  // Flipper-Builds sind fuer das Flipper-WLAN-Modul, NICHT fuer Standalone-Boards -> nach unten
-  list.sort((x,y)=>(isFlipper(x.name)?1:0)-(isFlipper(y.name)?1:0));
-  // erkannten Chip nach oben (staerker gewichtet als Flipper-Deprio)
-  if(detectedChip){const k=detectedChip.replace("esp32","");list.sort((x,y)=>(y.name.toLowerCase().includes(k)?1:0)-(x.name.toLowerCase().includes(k)?1:0));}
+  // Flipper-Modus: flipper-Builds nach oben. Standalone: flipper-Builds nach unten.
+  list.sort((x,y)=>((isFlipper(x.name)?1:0)-(isFlipper(y.name)?1:0))*(flip?-1:1));
+  // erkannten Chip nach oben (nur relevant im Standalone-Modus; flipper-Build hat keinen Chip-Token)
+  if(detectedChip&&!flip){const k=detectedChip.replace("esp32","");list.sort((x,y)=>(y.name.toLowerCase().includes(k)?1:0)-(x.name.toLowerCase().includes(k)?1:0));}
   list.forEach(a=>{const o=document.createElement("option");o.value=a.url;o.dataset.name=a.name;
-    o.textContent=`${isFlipper(a.name)?"⚠ ":""}${a.tag} · ${a.name} (${(a.size/1048576).toFixed(2)} MB)`;sel.appendChild(o);});
+    const bad=flip?!isFlipper(a.name):isFlipper(a.name);   // im jeweiligen Modus falscher Build -> markieren
+    o.textContent=`${bad?"⚠ ":""}${a.tag} · ${a.name} (${(a.size/1048576).toFixed(2)} MB)`;sel.appendChild(o);});
   if(!list.length)sel.innerHTML="<option>— kein Treffer —</option>";
   $("appFlash").disabled=!list.length;$("repairUni").disabled=!list.length;fwCheckPick();}
-// Warnt, wenn ein Flipper-Build fuer ein Standalone-Board gewaehlt wurde (haeufiger Fehlgriff: scanap/scansta tot)
-function fwCheckPick(){const o=$("fwSelect").selectedOptions[0];if(!o)return;
-  if(isFlipper(o.dataset.name||o.value||"")){
-    $("fwStatus").innerHTML="⚠ <b>Flipper-Build gewählt.</b> Der ist NUR fürs Flipper-Zero-WLAN-Modul — auf einem Standalone-Board sind <code>scanap</code>/<code>scansta</code> tot. Für dein DevKitC-1 einen <b>multiboardS3</b>-Build ohne 'flipper' im Namen nehmen.";}
+// Warnt, wenn der Build nicht zum Betriebsmodus passt
+function fwCheckPick(){const o=$("fwSelect").selectedOptions[0];if(!o)return;const flip=isFlipper(o.dataset.name||o.value||"");
+  if(opMode==="flipper"&&!flip)
+    $("fwStatus").innerHTML="⚠ <b>Non-Flipper-Build im Flipper-Modus.</b> Am Flipper brauchst du den <b>_flipper</b>-Build (nutzt Flipper-SD/Screen/Bridge).";
+  else if(opMode!=="flipper"&&flip)
+    $("fwStatus").innerHTML="⚠ <b>Flipper-Build im Standalone-Modus.</b> Da sind <code>scanap</code>/<code>scansta</code> tot — nimm <b>multiboardS3</b> (ohne 'flipper').";
 }
 /* ---------- Automatische Firmware-Wahl nach erkanntem Chip ---------- */
 function chipTokens(k){return ({esp32s3:["s3"],esp32s2:["s2"],esp32c3:["c3"],esp32c5:["c5"],esp32c6:["c6"],esp32h2:["h2"]})[k]||[];}
 // Bewertet einen Build fuer den erkannten Chip: hoeher = besser. Flipper/falsche Familie stark abgewertet.
-function fwScore(name,chipKey){const n=(name||"").toLowerCase();let s=0;
-  if(isFlipper(n))s-=1000;                                   // nie auf Standalone-Board
+function fwScore(name,chipKey){const n=(name||"").toLowerCase();let s=0;const flip=isFlipper(n);
+  if(/beta|nightly|_rc|dev_/.test(n))s-=500;                 // instabile Vorabversion -> nur wenn nichts anderes
+  if(opMode==="flipper")return s+(flip?400:-600);            // ueber Flipper: flipper-Build ist der richtige, Chip egal
+  if(flip)s-=1000;                                           // Standalone: nie flipper
   if(chipKey==="esp32"){                                     // Classic: hat 'esp32', aber KEINE Variante
     if(/(s2|s3|c2|c3|c5|c6|h2)/.test(n))s-=300;else if(/esp32/.test(n))s+=100;
   }else{const toks=chipTokens(chipKey);
@@ -1192,9 +1281,16 @@ async function autoFlashBest(){if(!(await loadEsptool()))return;
 async function fwList(){$("fwStatus").textContent="lade Build-Liste von GitHub ...";
   try{const r=await fetch(GH_API,{headers:{Accept:"application/vnd.github+json"}});if(!r.ok)throw new Error("HTTP "+r.status);
     const rels=await r.json();fwAssets=[];
-    for(const rel of rels)for(const a of(rel.assets||[]))if(/\.bin$/i.test(a.name))
-      fwAssets.push({name:a.name,url:a.browser_download_url,size:a.size,tag:rel.tag_name});
-    fwRender();populateBoards();$("fwStatus").textContent=fwAssets.length+" Builds geladen. Board oben wählen oder frei filtern.";}
+    const wantBeta=$("fwBeta")&&$("fwBeta").checked;
+    let skipped=0;
+    for(const rel of rels){
+      const pre=rel.prerelease||rel.draft||/beta|nightly|rc|dev/i.test(rel.tag_name||"");
+      if(pre&&!wantBeta){skipped++;continue;}                 // instabile Vorabversionen weglassen (Boot-Loop-Gefahr)
+      for(const a of(rel.assets||[]))if(/\.bin$/i.test(a.name))
+        fwAssets.push({name:a.name,url:a.browser_download_url,size:a.size,tag:rel.tag_name,beta:!!pre});
+    }
+    fwRender();populateBoards();
+    $("fwStatus").textContent=fwAssets.length+" stabile Builds geladen"+(skipped?" ("+skipped+" Beta/Nightly ausgeblendet)":"")+". Board oben wählen oder frei filtern.";}
   catch(e){$("fwStatus").textContent="Liste fehlgeschlagen ("+e.message+"). Rate-Limit? Später erneut, oder App manuell (C).";}}
 // GitHub-Release-Assets senden keine CORS-Header -> Direktversuch scheitert oft ("Failed to fetch").
 // Darum Kette: erst direkt (falls Ziel CORS liefert), dann mehrere CORS-Proxies der Reihe nach.
@@ -1374,6 +1470,7 @@ const MACRO_PRESETS={
   stascan:"# APs + verbundene Stationen\nscanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -c",
   fullrecon:"# Voll-Recon: AP + STA + SSIDs + BLE\nscanap\nwait 8000\nstopscan\nlist -a\nscansta\nwait 8000\nstopscan\nlist -c\nlist -s\nblescan -t all\nwait 8000\nstopscan",
   pmkid_hunt:"# WPA-Handshake/PMKID auf allen Kanaelen mitschneiden\n"+hopSniff("sniffpmkid",2500),
+  handshake:"# WPA-Handshake Kanal 11 (Kanal an dein Ziel anpassen!) - sniffpmkid -d snifft + deauthet -> PCAP auf SD\nstopscan\nchannel -s 11\nsniffpmkid -c 11 -d\nwait 30000\nstopscan",
   probe_recon:"# Probe-Requests sammeln (Geraetesuchen)\n"+hopSniff("sniffprobe",1500),
   // --- BLE ---
   blescan:"# BLE-Geraete scannen\nblescan -t all\nwait 8000\nstopscan",
@@ -1475,7 +1572,78 @@ $("atkDeauthSta").onclick=async()=>{const t=[...staTargets.values()];
   if(!t.length){append("Keine Stationen gewählt (Stationen-Tabelle anhaken — nicht APs).","line-err");return;}
   append("Deauth gegen "+t.length+" Station(en)...","line-sys");
   for(const s of t){if(s.ch)await fire("channel -s "+s.ch);await fire("attack -t deauth -d "+s.mac);}};
+// WPA-Handshake/PMKID-Capture: Kanal setzen + sniffpmkid -d (Sniff + Deauth in einem) -> PCAP auf SD
+$("capStart").onclick=async()=>{if(!writer){append("Nicht verbunden.","line-err");return;}
+  const ap=[...apTargets.values()];
+  const ch=(ap[0]&&ap[0].ch)||parseInt($("capCh").value,10)||1;
+  capHits=0;$("capStatus").innerHTML="Capture läuft auf Kanal "+ch+" — warte auf EAPOL/PMKID...";
+  await fire("stopscan");await new Promise(r=>setTimeout(r,150));
+  await fire("channel -s "+ch);await new Promise(r=>setTimeout(r,150));
+  append("Handshake-Capture: sniffpmkid -c "+ch+" -d (Sniff + Deauth). PCAP -> SD-Karte (falls vorhanden).","line-sys");
+  await fire("sniffpmkid -c "+ch+" -d");};
+// Lokaler PCAP-Recorder (kein SD): baut aus gesammelten Frames eine gueltige .pcap (LINKTYPE_IEEE802_11=105)
+function buildPcap(frames){let tot=24;frames.forEach(f=>tot+=16+f.length);
+  const buf=new ArrayBuffer(tot),dv=new DataView(buf);
+  dv.setUint32(0,0xa1b2c3d4,true);dv.setUint16(4,2,true);dv.setUint16(6,4,true);
+  dv.setInt32(8,0,true);dv.setUint32(12,0,true);dv.setUint32(16,65535,true);dv.setUint32(20,105,true);
+  let o=24;const now=Math.floor(Date.now()/1000);
+  frames.forEach(f=>{dv.setUint32(o,now,true);dv.setUint32(o+4,0,true);dv.setUint32(o+8,f.length,true);dv.setUint32(o+12,f.length,true);o+=16;
+    new Uint8Array(buf,o,f.length).set(f);o+=f.length;});
+  return buf;}
+$("pcapRec").onclick=()=>{pcapRec=!pcapRec;$("pcapRec").textContent=pcapRec?"⏹ Aufnahme läuft…":"⏺ Lokale PCAP-Aufnahme (experimentell)";
+  append(pcapRec?"Lokale PCAP-Aufnahme AN — rohe Frame-Hex-Zeilen werden gesammelt. (Nur wenn Firmware Frame-Hex ausgibt.)":"PCAP-Aufnahme AUS.","line-sys");};
+$("pcapDl").onclick=()=>{if(!pcapFrames.length){append("Keine Frames aufgenommen — diese Firmware gibt keine Frame-Hex über USB aus. Ohne SD kein Handshake-Export.","line-err");return;}
+  const b=new Blob([buildPcap(pcapFrames)],{type:"application/vnd.tcpdump.pcap"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="marauder_capture.pcap";a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  append("PCAP mit "+pcapFrames.length+" Frames heruntergeladen.","line-sys");};
 renderTargets();
+
+/* ---------- Flipper-CLI (Kanal 0): zweite Serial-Verbindung, PCAP per 'storage read' holen ---------- */
+let fport=null,freader=null,fwriter=null,fKeep=false;
+let fRaw=new Uint8Array(0);           // roher RX-Puffer (byte-genau, KEIN utf8-decode fuer Binaerdaten)
+let fPend=null,fCap=null;             // fPend={name}: warte auf "Size:"; fCap={want,got,len,name}: binaerer Capture
+function fcat(a,b){const c=new Uint8Array(a.length+b.length);c.set(a);c.set(b,a.length);return c;}
+function bytesToLatin1(u){let s="";const CH=0x8000;for(let i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));return s;}
+async function fconnect(){try{fport=await navigator.serial.requestPort();await fport.open({baudRate:115200});
+    fwriter=fport.writable.getWriter();fKeep=true;fReadLoop();
+    $("fState").textContent="verbunden ✓";$("fList").disabled=false;$("fPull").disabled=false;
+    append("Flipper-CLI (Kanal 0) verbunden.","line-sys");
+  }catch(e){if(e.name!=="NotFoundError")append("Flipper-CLI-Fehler: "+e.message,"line-err");}}
+async function fsend(t){if(!fwriter){append("Flipper-CLI nicht verbunden.","line-err");return;}
+  await fwriter.write(new TextEncoder().encode(t+"\r\n"));}
+async function fReadLoop(){
+  while(fport&&fport.readable&&fKeep){freader=fport.readable.getReader();
+    try{while(true){const{value,done}=await freader.read();if(done)break;if(!value)continue;
+      fRaw=fcat(fRaw,value);fProcess();}}
+    catch(e){append("Flipper-CLI-Lesefehler: "+e.message,"line-err");}finally{freader.releaseLock();}}}
+function fProcess(){
+  // binaerer Capture laeuft -> Bytes einsammeln bis 'want' erreicht
+  if(fCap){const take=Math.min(fRaw.length,fCap.want-fCap.len);
+    fCap.got.set(fRaw.subarray(0,take),fCap.len);fCap.len+=take;fRaw=fRaw.subarray(take);
+    if(fCap.len>=fCap.want)fFinishCap();return;}
+  // auf "Size: N" warten (Start des Datei-Inhalts)
+  if(fPend){const s=bytesToLatin1(fRaw);const mm=s.match(/Size:\s*(\d+)\r?\n/i);
+    if(mm){const end=s.indexOf(mm[0])+mm[0].length;const n=+mm[1];
+      fCap={want:n,got:new Uint8Array(n),len:0,name:fPend.name};fPend=null;
+      fRaw=fRaw.subarray(end);fProcess();return;}
+    if(fRaw.length>4096)fRaw=fRaw.subarray(fRaw.length-2048);   // Puffer begrenzen bis Marker kommt
+    return;}
+  // normaler CLI-Text -> loggen, Puffer leeren
+  const t=bytesToLatin1(fRaw).replace(/[^\x09\x0a\x0d\x20-\x7e]/g,"");
+  t.split(/\r?\n/).forEach(l=>{if(l.trim())append("[flipper] "+l,"line-sys");});
+  fRaw=new Uint8Array(0);}
+function fFinishCap(){const c=fCap;fCap=null;
+  const b=new Blob([c.got],{type:"application/vnd.tcpdump.pcap"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(c.name.split("/").pop()||"capture.pcap");a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  append("PCAP vom Flipper geladen: "+c.name+" ("+c.want+" B) -> heruntergeladen.","line-sys");}
+$("fConnect").onclick=fconnect;
+$("fList").onclick=()=>{append("Flipper: liste PCAPs...","line-sys");fsend("storage list /ext/apps_data/marauder");};
+$("fPull").onclick=()=>{const p=$("fPath").value.trim();
+  if(!/^\/ext\//.test(p)){append("Pfad muss mit /ext/ beginnen (z.B. /ext/apps_data/marauder/x.pcap).","line-err");return;}
+  if(fCap||fPend){append("Capture läuft schon.","line-err");return;}
+  fPend={name:p};fRaw=new Uint8Array(0);append("Flipper: hole "+p+" ...","line-sys");fsend("storage read "+p);};
 
 // portal
 $("epStartFile").onclick=()=>{const f=$("epFile").value.trim();if(f)fire("evilportal -c start -w "+f);};
@@ -1509,6 +1677,9 @@ $("autoRepair").onclick=autoRepair;$("flashConnect").onclick=flashConnect;$("era
 $("doFlash").onclick=doFlash;$("flashReset").onclick=flashReset;$("fwList").onclick=fwList;$("appFlash").onclick=appFlash;$("repairUni").onclick=repairUni;$("fwSearch").addEventListener("input",fwRender);
 $("fwSelect").addEventListener("change",fwCheckPick);
 $("fwBoard").addEventListener("change",onBoardPick);
+$("fwBeta").addEventListener("change",()=>{if(fwAssets.length||$("fwBeta").checked)fwList();});
+$("opMode").addEventListener("change",()=>setOpMode($("opMode").value));
+setOpMode(opMode);  // beim Laden Modus + Texte synchronisieren
 $("autoFlashBest").onclick=autoFlashBest;
 $("boardPreset").onchange=applyBoard;$("hwReset").onclick=hwReset;$("bootMode").onclick=bootMode;
 
