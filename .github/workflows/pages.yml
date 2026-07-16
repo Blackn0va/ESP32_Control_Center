@@ -26,10 +26,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
+      # Pages ist in den Repo-Settings auf "GitHub Actions" gestellt -> Site existiert,
+      # kein enablement noetig (der GITHUB_TOKEN darf die Site ohnehin nicht selbst anlegen).
       - uses: actions/configure-pages@v5
-        with:
-          # Aktiviert Pages automatisch (Build-Typ: GitHub Actions), falls noch nicht eingerichtet
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
